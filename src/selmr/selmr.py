@@ -2,7 +2,7 @@
 """
 
 import logging
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from .const import (
     MAX_CONTEXT_LENGTH,
@@ -13,7 +13,9 @@ from .const import (
     WORDS_FILTER,
     LanguageMultisets,
 )
-from .extraction import process_documents
+from .extractor import extract_phrases, process_documents
+from .multisets import Multiset, merge_multiset
+from .tokenizer import preprocess
 
 # from selmr import __version__
 
@@ -176,11 +178,26 @@ class SELMR(object):
 
         """
         if multisets is not None:
-            self._phrases = multisets.phrases
-            self._contexts = multisets.contexts
+            if multisets.phrases is not None:
+                self._phrases = dict()
+                for phrase, contexts in multisets.phrases.items():
+                    self._phrases[phrase] = Multiset(contexts)
+            if multisets.contexts is not None:
+                self._contexts = dict()
+                for context, phrases in multisets.contexts.items():
+                    self._contexts[context] = Multiset(phrases)
+            if multisets.lemmas is not None:
+                # dictionary with key=phrase and value=lemma
+                self._phrase2lemma = multisets.lemmas
+                self._lemmas = defaultdict(Multiset)
+                for phrase, lemmas in multisets.lemmas.items():
+                    for lemma in lemmas:
+                        self._lemmas[lemma].update(self._phrases[phrase])
         else:
-            self._phrases = defaultdict(Counter)
-            self._contexts = defaultdict(Counter)
+            self._phrases = defaultdict(Multiset)
+            self._contexts = defaultdict(Multiset)
+            self._phrase2lemma = dict()
+            self._lemma2phrases = dict()
 
     def add_multisets(self, multisets: LanguageMultisets = None) -> None:
         """
@@ -231,7 +248,6 @@ class SELMR(object):
         if documents is not None:
             multisets = process_documents(
                 documents=documents,
-                multisets=LanguageMultisets(self._phrases, self._contexts),
                 params=self.params,
             )
             self.add_multisets(multisets=multisets)
@@ -285,47 +301,37 @@ class SELMR(object):
         assert self._phrases is not None, "No phrases multisets defined"
 
         if phrase is not None and phrase not in self._phrases.keys():
-            _logger.info("Phrase " + phrase + " not found in phrases multisets")
+            _logger.info("Phrase " + repr(phrase) + " not found in phrases multisets")
             return dict()
         if context is not None and context not in self._contexts.keys():
-            _logger.info("Context " + str(context) + " not found in contexts multisets")
+            _logger.info(
+                "Context " + repr(context) + " not found in contexts multisets"
+            )
             return dict()
         if phrase is None:
             _logger.info("No phrase defined")
             return dict()
 
-        if context is not None and phrase is not None:
-            phrases = [
-                p[0] for p in self._contexts.get(context, None).most_common(topphrases)
-            ]
-            contexts = [
-                c[0] for c in self._phrases.get(phrase, None).most_common(topcontexts)
-            ]
-            return Counter(
+        contexts = list(self._phrases.get(phrase, None).topn(topcontexts).keys())
+        if context is not None:
+            phrases = list(self._contexts.get(context, None).topn(topphrases).keys())
+            return Multiset(
                 {
                     phrase: len(self._phrases[phrase].keys() & contexts)
                     for phrase in phrases[:topn]
                 }
             )
         else:
-            contexts = [
-                c[0] for c in self._phrases.get(phrase, None).most_common(topcontexts)
-            ]
             list_of_phrases = [
-                self._contexts[context].most_common(topn) for context in contexts
+                self._contexts[context].topn(topn).keys() for context in contexts
             ]
-            phrases = set(item[0] for sublist in list_of_phrases for item in sublist)
-            return Counter(
+            phrases = set(item for sublist in list_of_phrases for item in sublist)
+            return Multiset(
                 {
-                    p[0]: p[1]
-                    for p in Counter(
-                        {
-                            phrase: len(self._phrases[phrase].keys() & contexts)
-                            for phrase in phrases
-                        }
-                    ).most_common(topn)
+                    phrase: len(self._phrases[phrase].keys() & contexts)
+                    for phrase in phrases
                 }
-            )
+            ).topn(topn)
 
     def contexts(
         self,
@@ -333,7 +339,8 @@ class SELMR(object):
         left: str = None,
         right: str = None,
         topn: int = 15,
-    ) -> Counter:
+        include_other_forms: bool = False,
+    ) -> Multiset:
         """
         Find the most similar contexts for a given phrase and optional left and
         right context.
@@ -348,10 +355,12 @@ class SELMR(object):
             right (str, optional): The right context of the phrase (default is None).
             topn (int, optional): The number of most similar contexts to retrieve
             (default is 15).
+            include_other_forms (bool, optional): include other inflected forms of the
+            phrase in the multisets (default is False)
 
         Returns:
-            collections.Counter: A Counter object containing the most similar contexts
-            and their respective counts.
+            selmr.Multisets.Multiset: A Multiset object containing the most similar
+            contexts and their respective counts.
 
         Example:
             # Find the most similar contexts for a given phrase
@@ -363,21 +372,41 @@ class SELMR(object):
             print(similar_contexts)
 
         Notes:
-            - If no input parameters are provided, the method returns an empty Counter.
+            - If no input parameters are provided, the method returns an empty Multiset.
 
         """
         assert self._contexts is not None, "No contexts multisets defined"
         assert self._phrases is not None, "No phrases multisets defined"
 
-        if phrase is not None and phrase not in self._phrases.keys():
-            _logger.info("Phrase " + phrase + " not found in phrases multisets")
-            return Counter()
+        if include_other_forms:
+            assert self._phrase2lemma is not None, "No lemmas multisets defined"
+            if phrase is not None and phrase not in self._phrase2lemma.keys():
+                _logger.info("Could not find lemma of phrase " + repr(phrase))
+                return Multiset()
+            lemma = self._phrase2lemma.get(phrase, None)
+            if len(lemma) == 1:
+                lemma = list(lemma)[0]
+            else:
+                _logger.info("Phrase " + repr(phrase) + " has more than one lemmas")
+                return Multiset()
 
-        return Counter({p[0]: p[1] for p in self._phrases[phrase].most_common(topn)})
+            if lemma not in self._lemmas.keys():
+                logging.debug("Lemma " + repr(lemma) + " not found in multisets.")
+                return Multiset()
+            else:
+                multisets = self._lemmas[lemma]
+        else:
+            if phrase is not None and phrase not in self._phrases.keys():
+                _logger.info("Phrase " + phrase + " not found in phrases multisets")
+                return Multiset()
+            else:
+                multisets = self._phrases[phrase]
+
+        return multisets.topn(topn)
 
     def phrases(
         self, context: tuple = None, left: str = None, right: str = None, topn: int = 15
-    ) -> Counter:
+    ) -> Multiset:
         """
         Find the phrases from a given context.
 
@@ -393,15 +422,15 @@ class SELMR(object):
             topn (int, optional): The number of top phrases to return. Defaults to 15.
 
         Returns:
-            Counter: A Counter object containing the counted phrases as key-value pairs,
-            where keys are the phrases, and values are their counts.
+            Multiset: A Multiset object containing the counted phrases as key-value
+            pairs, where keys are the phrases, and values are their counts.
 
         Example:
             To extract and count phrases from a specific text context and retrieve the
             top 10 phrases, you can call the function like this:
             selmr.phrases(("the", "of"), topn=10)
         """
-        return Counter({p[0]: p[1] for p in self._contexts[context].most_common(topn)})
+        return self._contexts[context].topn(topn)
 
     def dict_phrases_contexts(
         self,
@@ -446,9 +475,59 @@ class SELMR(object):
             "columns": contexts.keys(),
             "data": [],
             "index_names": ["phrase"],
-            "column_names": ["left context phrase", "right context phrase"],
+            "column_names": ["left context", "right context"],
         }
         for p in phrases:
             phrase_contexts = self.contexts(p, topn=None)
             d["data"].append([phrase_contexts.get(c, 0) for c in contexts.keys()])
         return d
+
+    def derive_multisets(
+        self,
+        documents: list = None,
+        lemmas: bool = False,
+        exclude_stopwords: bool = True,
+        merge_dict: bool = False,
+        topn: int = 15,
+        params: dict = {},
+    ):
+        """
+        extract the phrases of a string and create dict of phrases with their contexts
+        """
+
+        documents = [
+            preprocess(document=document, params=params) for document in documents
+        ]
+        document_phrases = extract_phrases(documents=documents, params=params)
+
+        if exclude_stopwords and self.params[WORDS_FILTER] is not None:
+            to_delete = set()
+            for phrase in document_phrases.keys():
+                for word in phrase.split(" "):
+                    if self.params[WORDS_FILTER]["data"].get(word, False):
+                        to_delete.add(phrase)
+            for phrase in to_delete:
+                del document_phrases[phrase]
+
+        res = dict()
+        for phrase in document_phrases.keys():
+            if lemmas:
+                lemma = list(self._phrase2lemma.get(phrase, set([None])))[0]
+                if lemma not in self._lemmas.keys():
+                    logging.debug("Lemma " + repr(lemma) + " not found in multisets.")
+                    multiset = None
+                else:
+                    multiset = self._lemmas.get(lemma)
+            else:
+                if phrase not in self._phrases.keys():
+                    logging.debug("Phrase " + repr(phrase) + " not found in multisets.")
+                    multiset = None
+                else:
+                    multiset = self._phrases.get(phrase)
+
+            if multiset is not None:
+                res[phrase] = multiset.topn(topn)
+
+        if merge_dict:
+            res = merge_multiset(res)
+        return res

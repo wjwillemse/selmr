@@ -80,7 +80,7 @@ def process_documents(documents: list = None, params: dict = {}):
     for d_context, d_phrases in contexts.items():
         for d_phrase, d_value in d_phrases.items():
             phrases[d_phrase][d_context] = d_value
-    return LanguageMultisets(phrases, contexts)
+    return LanguageMultisets(phrases, contexts, None)
 
 
 def extract_phrases(documents: list = None, params: dict = {}):
@@ -400,12 +400,6 @@ def generate_sentence_phrases(
     ]
     custom_params = {
         'max_phrase_length': 4,
-        'words_filter': {
-            'data': {
-                'is': True,
-                'for': True,
-            }
-        }
     }
 
     # Generate phrases from the sentences and process them

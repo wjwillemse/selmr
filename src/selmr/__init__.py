@@ -26,11 +26,18 @@ from .const import (
     WORDS_FILTER,
     LanguageMultisets,
 )
-from .extraction import (
+from .extractor import (
     extract_contexts,
     extract_phrases,
     generate_sentence_phrases,
     process_documents,
 )
+from .multisets import (
+    Multiset,
+    containment_index,
+    jaccard_index,
+    weighted_jaccard_index,
+)
+from .search import MinHashSearch
 from .selmr import SELMR
 from .tokenizer import preprocess, tokenize_text, tokenizer

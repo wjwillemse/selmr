@@ -31,12 +31,12 @@ selmr
 
 Create SELMRs that work like language models that allow you to
 
-  - create explainable word and phrase representations without random results, and to
+  - create from the ground up explainable word and phrase representations without random results, and to
 
   - combine these representations with lexical, linguistic and terminological annotations
 
 
-See the `documentation <https://nifigator.readthedocs.io>`_ built from the code.
+See the `documentation <https://selmr.readthedocs.io>`_ built from the code.
 
 
 Installation

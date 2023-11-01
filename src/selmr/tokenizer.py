@@ -6,7 +6,7 @@ import logging
 import regex as re
 import syntok.segmenter as segmenter
 
-from .const import FORCED_SENTENCE_SPLIT_CHARACTERS, REGEX_FILTER
+from .const import ADD_SENT_TOKENS, FORCED_SENTENCE_SPLIT_CHARACTERS, REGEX_FILTER
 
 # from selmr import __version__
 
@@ -27,6 +27,7 @@ def preprocess(
     """ """
     split_characters = params.get(FORCED_SENTENCE_SPLIT_CHARACTERS, [])
     regex_filter = params.get(REGEX_FILTER, default_regex_filter)
+    add_sent_tokens = params.get(ADD_SENT_TOKENS, False)
     # tokenize documents into sentences
     sentences = [
         [word["text"] for word in sentence]
@@ -35,19 +36,25 @@ def preprocess(
     if regex_filter is not None:
         # select tokens given a regex filter and add start and end of sentence
         # tokens SENTSTART and SENTEND
-        preprocessed = [
-            # ["SENTSTART"] +
-            [word for word in sentence if re.match(regex_filter, word)]
-            # + ["SENTEND"]
-            for sentence in sentences
-        ]
+        if add_sent_tokens:
+            preprocessed = [
+                ["SENTSTART"]
+                + [word for word in sentence if re.match(regex_filter, word)]
+                + ["SENTEND"]
+                for sentence in sentences
+            ]
+        else:
+            preprocessed = [
+                [word for word in sentence if re.match(regex_filter, word)]
+                for sentence in sentences
+            ]
     else:
-        preprocessed = [
-            # ["SENTSTART"] +
-            sentence
-            # + ["SENTEND"]
-            for sentence in sentences
-        ]
+        if add_sent_tokens:
+            preprocessed = [
+                ["SENTSTART"] + sentence + ["SENTEND"] for sentence in sentences
+            ]
+        else:
+            preprocessed = sentences
     return preprocessed
 
 
