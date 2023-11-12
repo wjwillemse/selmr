@@ -2,7 +2,9 @@
 """
 
 import logging
-from collections import defaultdict
+import os
+import pickle
+from collections import OrderedDict, defaultdict
 
 from .const import (
     MAX_CONTEXT_LENGTH,
@@ -69,6 +71,7 @@ class SELMR(object):
 
     def __init__(
         self,
+        path: str = None,
         documents: list = None,
         multisets: LanguageMultisets = None,
         lang: str = None,
@@ -77,6 +80,7 @@ class SELMR(object):
         self.set_params(params=params)
         self.set_language(lang=lang)
         self.set_multisets(multisets=multisets)
+        self.set_path(path=path)
         self.add(documents=documents)
 
     def set_params(self, params: dict = None) -> None:
@@ -158,12 +162,62 @@ class SELMR(object):
         """
         self.lang = lang
 
+    def set_path(self, path: str = None) -> None:
+        if path is not None:
+            phrases = None
+            lemmas = None
+            file = os.path.join(path, "phrases.pickle")
+            if os.path.exists(file):
+                with open(file, "rb") as handle:
+                    phrases = pickle.load(handle)
+            file = os.path.join(path, "lemmas.pickle")
+            if os.path.exists(file):
+                with open(file, "rb") as handle:
+                    lemmas = pickle.load(handle)
+            multisets = LanguageMultisets(phrases, None, lemmas)
+            self.set_multisets(multisets=multisets)
+
+    def uncase_phrases_multisets(self, phrases: dict = None):
+        """ """
+        ps_uncased = defaultdict(Multiset)
+        for p, cs in phrases.items():
+            p_uncased = p.lower()
+            cs_uncased = Multiset()
+            for c, v in cs.items():
+                c_uncased = (
+                    c[0].lower() if c[0] != "SENTSTART" else c[0],
+                    c[1].lower() if c[1] != "SENTEND" else c[1],
+                )
+                if c_uncased in cs_uncased.keys():
+                    cs_uncased[c_uncased] += v
+                else:
+                    cs_uncased[c_uncased] = v
+            ps_uncased[p_uncased].update(cs_uncased)
+        return ps_uncased
+
+    def lemmatize_phrases_multisets(self, phrases: dict = None):
+        """ """
+        assert self._phrase2lemma is not None, "No lemmas defined"
+        lemmatized_ps = defaultdict(Multiset)
+        for p, ls in self._phrase2lemma.items():
+            for le in ls:
+                lemmatized_ps[le].update(self._phrases[p])
+        return lemmatized_ps
+
+    def set_contexts_multisets(self, phrases: dict = None):
+        """ """
+        new_cs = defaultdict(Multiset)
+        for p, cs in phrases.items():
+            for c, v in cs.items():
+                new_cs[c][p] = v
+        return new_cs
+
     def set_multisets(self, multisets: LanguageMultisets = None) -> None:
         """
         Set the multiset data for the SELMR object.
 
-        This function sets LanguageMultisets (phrases and contexts) for
-        the SELMR object.
+        This function sets LanguageMultisets (phrases and lemmas) for the
+        SELMR object.
 
         Parameters:
             multisets (LanguageMultisets, optional): The multisets to set.
@@ -177,27 +231,27 @@ class SELMR(object):
             set_multisets(multisets)
 
         """
+        uncased = self.params.get("uncased", False)
+        lemmatized = self.params.get("lemmatized", False)
         if multisets is not None:
             if multisets.phrases is not None:
                 self._phrases = dict()
                 for phrase, contexts in multisets.phrases.items():
                     self._phrases[phrase] = Multiset(contexts)
-            if multisets.contexts is not None:
-                self._contexts = dict()
-                for context, phrases in multisets.contexts.items():
-                    self._contexts[context] = Multiset(phrases)
-            if multisets.lemmas is not None:
-                # dictionary with key=phrase and value=lemma
+
                 self._phrase2lemma = multisets.lemmas
-                self._lemmas = defaultdict(Multiset)
-                for phrase, lemmas in multisets.lemmas.items():
-                    for lemma in lemmas:
-                        self._lemmas[lemma].update(self._phrases[phrase])
+                if lemmatized:
+                    self._phrases = self.lemmatize_phrases_multisets(self._phrases)
+
+                if uncased:
+                    self._phrases = self.uncase_phrases_multisets(self._phrases)
+
+                self._contexts = self.set_contexts_multisets(self._phrases)
+
         else:
             self._phrases = defaultdict(Multiset)
             self._contexts = defaultdict(Multiset)
             self._phrase2lemma = dict()
-            self._lemma2phrases = dict()
 
     def add_multisets(self, multisets: LanguageMultisets = None) -> None:
         """
@@ -300,17 +354,29 @@ class SELMR(object):
         assert self._contexts is not None, "No contexts multisets defined"
         assert self._phrases is not None, "No phrases multisets defined"
 
-        if phrase is not None and phrase not in self._phrases.keys():
-            _logger.info("Phrase " + repr(phrase) + " not found in phrases multisets")
-            return dict()
+        if phrase is None:
+            raise ValueError("No phrase defined")
+
+        if self.params.get("lemmatized", False):
+            if self._phrase2lemma is None:
+                raise ValueError("No lemmas multisets defined")
+            else:
+                if phrase not in self._phrase2lemma.keys():
+                    raise ValueError("Could not find lemma of phrase " + repr(phrase))
+                else:
+                    phrase = list(self._phrase2lemma[phrase])[0]
+
+        if phrase not in self._phrases.keys():
+            raise ValueError(
+                "Phrase " + repr(phrase) + " not found in phrases multisets"
+            )
+
         if context is not None and context not in self._contexts.keys():
-            _logger.info(
+            raise ValueError(
                 "Context " + repr(context) + " not found in contexts multisets"
             )
-            return dict()
         if phrase is None:
-            _logger.info("No phrase defined")
-            return dict()
+            raise ValueError("No phrase defined")
 
         contexts = list(self._phrases.get(phrase, None).topn(topcontexts).keys())
         if context is not None:
@@ -339,7 +405,6 @@ class SELMR(object):
         left: str = None,
         right: str = None,
         topn: int = 15,
-        include_other_forms: bool = False,
     ) -> Multiset:
         """
         Find the most similar contexts for a given phrase and optional left and
@@ -378,29 +443,31 @@ class SELMR(object):
         assert self._contexts is not None, "No contexts multisets defined"
         assert self._phrases is not None, "No phrases multisets defined"
 
-        if include_other_forms:
-            assert self._phrase2lemma is not None, "No lemmas multisets defined"
-            if phrase is not None and phrase not in self._phrase2lemma.keys():
-                _logger.info("Could not find lemma of phrase " + repr(phrase))
-                return Multiset()
-            lemma = self._phrase2lemma.get(phrase, None)
-            if len(lemma) == 1:
-                lemma = list(lemma)[0]
-            else:
-                _logger.info("Phrase " + repr(phrase) + " has more than one lemmas")
-                return Multiset()
+        uncased = self.params.get("uncased", False)
+        lemmatized = self.params.get("lemmatized", False)
 
-            if lemma not in self._lemmas.keys():
-                logging.debug("Lemma " + repr(lemma) + " not found in multisets.")
-                return Multiset()
+        if phrase is None:
+            raise ValueError("No phrase defined when calling contexts()")
+
+        if lemmatized:
+            if self._phrase2lemma is None:
+                raise ValueError("No lemmas multisets defined in current object")
             else:
-                multisets = self._lemmas[lemma]
+                if (
+                    phrase not in self._phrase2lemma.keys()
+                    or self._phrase2lemma[phrase] == set()
+                ):
+                    raise ValueError("Could not find lemma of phrase " + repr(phrase))
+                else:
+                    phrase = list(self._phrase2lemma[phrase])[0]
+
+        if uncased:
+            phrase = phrase.lower()
+
+        if phrase not in self._phrases.keys():
+            raise ValueError("Phrase " + phrase + " not found in phrases multisets")
         else:
-            if phrase is not None and phrase not in self._phrases.keys():
-                _logger.info("Phrase " + phrase + " not found in phrases multisets")
-                return Multiset()
-            else:
-                multisets = self._phrases[phrase]
+            multisets = self._phrases[phrase]
 
         return multisets.topn(topn)
 
@@ -430,7 +497,7 @@ class SELMR(object):
             top 10 phrases, you can call the function like this:
             selmr.phrases(("the", "of"), topn=10)
         """
-        return self._contexts[context].topn(topn)
+        return self._contexts.get(context, Multiset()).topn(topn)
 
     def dict_phrases_contexts(
         self,
@@ -484,8 +551,7 @@ class SELMR(object):
 
     def derive_multisets(
         self,
-        documents: list = None,
-        lemmas: bool = False,
+        document: str = None,
         exclude_stopwords: bool = True,
         merge_dict: bool = False,
         topn: int = 15,
@@ -494,11 +560,13 @@ class SELMR(object):
         """
         extract the phrases of a string and create dict of phrases with their contexts
         """
+        lemmatized = self.params.get("lemmatized", False)
+        if lemmatized:
+            if self._phrase2lemma is None:
+                raise ValueError("No lemmas multisets defined")
 
-        documents = [
-            preprocess(document=document, params=params) for document in documents
-        ]
-        document_phrases = extract_phrases(documents=documents, params=params)
+        document = preprocess(document=document, params=params)
+        document_phrases = extract_phrases(documents=[document], params=params)
 
         if exclude_stopwords and self.params[WORDS_FILTER] is not None:
             to_delete = set()
@@ -511,23 +579,52 @@ class SELMR(object):
 
         res = dict()
         for phrase in document_phrases.keys():
-            if lemmas:
-                lemma = list(self._phrase2lemma.get(phrase, set([None])))[0]
-                if lemma not in self._lemmas.keys():
-                    logging.debug("Lemma " + repr(lemma) + " not found in multisets.")
-                    multiset = None
-                else:
-                    multiset = self._lemmas.get(lemma)
-            else:
-                if phrase not in self._phrases.keys():
-                    logging.debug("Phrase " + repr(phrase) + " not found in multisets.")
-                    multiset = None
-                else:
-                    multiset = self._phrases.get(phrase)
+            # if lemmatized:
+            #     if self._phrase2lemma is None:
+            #         raise ValueError("No lemmas multisets defined in current object")
+            #     else:
+            #         if phrase not in self._phrase2lemma.keys():
+            #             phrase = None
+            #         else:
+            #             phrase = list(self._phrase2lemma[phrase])[0]
 
-            if multiset is not None:
-                res[phrase] = multiset.topn(topn)
+            # if uncased:
+            #     phrase = phrase.lower()
+
+            if lemmatized:
+                if (
+                    phrase in self._phrase2lemma.keys()
+                    and self._phrase2lemma[phrase] != set()
+                ):
+                    res[phrase] = self.contexts(phrase, topn=topn)
+            else:
+                if phrase in self._phrases.keys():
+                    res[phrase] = self.contexts(phrase, topn=topn)
 
         if merge_dict:
             res = merge_multiset(res)
         return res
+
+    def phrase_base_contexts(
+        self,
+        phrase: str = None,
+        topn: int = 35,
+    ):
+        contexts = [
+            c
+            for c in self.contexts(phrase, topn=topn)
+            if c[0].count(" ") == 0
+            and c[1].count(" ") == 0
+            and "SENTEND" not in c[1]
+            and "SENTSTART" not in c[0]
+        ]
+        c = OrderedDict()
+        for context in contexts:
+            c[context] = self.most_similar(
+                phrase=phrase,
+                context=context,
+                topcontexts=None,
+                topphrases=None,
+                topn=None,
+            )
+        return c

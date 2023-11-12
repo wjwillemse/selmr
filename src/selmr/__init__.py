@@ -35,6 +35,7 @@ from .extractor import (
 from .multisets import (
     Multiset,
     containment_index,
+    jaccard_distance_matrix,
     jaccard_index,
     weighted_jaccard_index,
 )

@@ -104,7 +104,6 @@ class MinHashSearch:
         """
         mh_dict = dict()
         for key, value in self.selmr._phrases.items():
-            # if any([key in item.keys() for item in self.documents.values()]):
             mh_dict[key] = MinHash(num_perm=self.num_perm)
             for item, count in value.most_common(self.topn):
                 v = str(item).encode("utf8")
@@ -140,6 +139,12 @@ class MinHashSearch:
         for key, elements in documents.items():
             mh[key] = MinHash(num_perm=self.num_perm)
             for element in elements.keys():
+                lemmatized = self.selmr.params.get("lemmatized", False)
+                if lemmatized:
+                    element = list(self.selmr._phrase2lemma[element])[0]
+                uncased = self.selmr.params.get("uncased", False)
+                if uncased:
+                    element = element.lower()
                 mh[key].merge(self.minhash_dict[element])
         return mh
 
@@ -155,9 +160,15 @@ class MinHashSearch:
 
         """
         # create minhash of the query
-        v = selmr.derive_multisets(documents=query, lemmas=True)
+        v = selmr.derive_multisets(document=query)
         minhash_query = MinHash(num_perm=self.num_perm)
         for element in v.keys():
+            lemmatized = self.selmr.params.get("lemmatized", False)
+            if lemmatized:
+                element = list(self.selmr._phrase2lemma[element])[0]
+            uncased = self.selmr.params.get("uncased", False)
+            if uncased:
+                element = element.lower()
             minhash_query.merge(self.minhash_dict[element])
         # determine scores from the lshensemble
         scores = dict()
@@ -174,7 +185,6 @@ class MinHashSearch:
         self,
         key1: str = None,
         key2: str = None,
-        include_lemmas: bool = True,
         topn: int = 15,
     ) -> MatchResult:
         """
@@ -186,8 +196,8 @@ class MinHashSearch:
 
         """
         # generate contexts of the text
-        v1 = self.selmr.derive_multisets(key1, topn=topn, lemmas=include_lemmas)
-        v2 = self.selmr.derive_multisets(key2, topn=topn, lemmas=include_lemmas)
+        v1 = self.selmr.derive_multisets(key1, topn=topn)
+        v2 = self.selmr.derive_multisets(key2, topn=topn)
 
         # find the full phrase matches of the text and the sentence
         full_matches = {
@@ -215,7 +225,4 @@ class MinHashSearch:
         }
         close_matches = dict(sorted(close_matches.items(), key=lambda item: item[1]))
         # calculate the containment index
-        c1 = merge_multiset(v1)
-        c2 = merge_multiset(v2)
-        score = 1 - containment_index(c1, c2)
-        return MatchResult(score, full_matches, close_matches)
+        return MatchResult(full_matches, close_matches)

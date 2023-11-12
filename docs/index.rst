@@ -10,6 +10,8 @@ Contents
 
    Overview <readme>
    01 Using SELMR
+   03 finding multiple word meanings
+   04 Search engine
    Contributions & Help <contributing>
    License <license>
    Authors <authors>

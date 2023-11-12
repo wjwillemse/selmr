@@ -6,6 +6,8 @@
 from collections import Counter
 from fractions import Fraction
 
+import numpy as np
+
 
 class Multiset(Counter):
     def __init__(self, *args, **kwargs):
@@ -50,7 +52,7 @@ def merge_multiset(d: dict = None):
     """
     Function to calculate the multiset from a dict of phrases
     """
-    x = Counter()
+    x = Multiset()
     for item in d.values():
         x += item
     return x
@@ -61,3 +63,11 @@ def weighted_jaccard_index(c1: Counter = None, c2: Counter = None):
     for item in set(c1.keys() & c2.keys()):
         r += min(c1[item], c2[item]) / max(c1[item], c2[item])
     return r
+
+
+def jaccard_distance_matrix(c: dict = None):
+    distances = np.zeros([len(c.keys()), len(c.keys())])
+    for i, key1 in enumerate(c.keys()):
+        for j, key2 in enumerate(c.keys()):
+            distances[i, j] = 1 - jaccard_index(c[key1], c[key2])
+    return distances
