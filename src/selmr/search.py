@@ -8,12 +8,11 @@ from typing import Optional
 
 from datasketch import MinHash, MinHashLSHEnsemble
 
-from .multisets import containment_index, merge_multiset
+from .multisets import containment_index, jaccard_index, merge_multiset
 from .selmr import SELMR
 
-MatchResult = namedtuple("MatchResult", ["score", "full_matches", "close_matches"])
+MatchResult = namedtuple("MatchResult", ["full_matches", "close_matches"])
 MatchResult.__doc__ = """A match result of the search engine"""
-MatchResult.score.__doc__ = "The score (float) of the matchresult"
 MatchResult.full_matches.__doc__ = (
     "The items in the first key that fully match the items in second key"
 )
@@ -201,7 +200,7 @@ class MinHashSearch:
 
         # find the full phrase matches of the text and the sentence
         full_matches = {
-            p1: [(p2, 0) for p2, c2 in v2.items() if 1 - containment_index(c2, c1) == 0]
+            p1: [(p2, 0) for p2, c2 in v2.items() if 1 - jaccard_index(c2, c1) == 0]
             for p1, c1 in v1.items()
         }
         full_matches = {
@@ -210,9 +209,9 @@ class MinHashSearch:
         # find the close phrase matches of the text and the sentence
         close_matches = {
             p1: [
-                (p2, 1 - containment_index(c2, c1))
+                (p2, 1 - jaccard_index(c2, c1))
                 for p2, c2 in v2.items()
-                if 1 - containment_index(c2, c1) < 1
+                if 1 - jaccard_index(c2, c1) < 1
                 and p1 not in full_matches.keys()
                 and p2 not in [p[0] for p in full_matches.values()]
             ]
@@ -226,3 +225,26 @@ class MinHashSearch:
         close_matches = dict(sorted(close_matches.items(), key=lambda item: item[1]))
         # calculate the containment index
         return MatchResult(full_matches, close_matches)
+
+    def print_search_results(self, query: str = None, topn: int = 5):
+        """ """
+        scores = self.get_scores(query, selmr=self.selmr)
+        for item, distance in list(scores.items())[:topn]:
+            print(item[0])
+            print(repr(item[1]))
+            print("- Score {0:.4f}: ".format(float(distance)))
+            i = self.matches(query, item[1])
+            print("- Full matches:")
+            for key, values in i.full_matches.items():
+                print("    " + ", ".join([repr(value[0]) for value in values]))
+            if len(i.close_matches) > 0:
+                print("- Close matches:")
+                for key, values in list(i.close_matches.items()):
+                    for value in values:
+                        print(
+                            "    "
+                            + repr(key)
+                            + " -> "
+                            + repr(value[0])
+                            + " ({0:.4f})".format(float(value[1]))
+                        )

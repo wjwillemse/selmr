@@ -23,6 +23,7 @@ from .const import (
     MIN_PHRASE_COUNT,
     MIN_PHRASECONTEXT_COUNT,
     REGEX_FILTER,
+    STOPWORDS,
     WORDS_FILTER,
     LanguageMultisets,
 )
