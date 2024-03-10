@@ -1,0 +1,22 @@
+[package]
+name = "selmr"
+description = "Package to create and use Simple Explainable Language Multiset Representations"
+readme = "README.md"
+homepage = "https://github.com/wjwillemse/selmr"
+repository = "https://github.com/wjwillemse/selmr"
+license = "MIT"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "selmr"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.19.0"
+serde = { version = "1.0.196", features = ["derive"] }
+serde_json = "1.0.113"
+counter = "0.5.7"
+unicode-segmentation = "1.11.0"
+postcard = { version = "1.0.7", features = ["use-std"] } 
+regex = "1.10.3"
