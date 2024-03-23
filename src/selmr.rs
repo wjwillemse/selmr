@@ -1,21 +1,23 @@
 use crate::text_structs::{Context, ContextCounter, ContextMap, Phrase, PhraseCounter, PhraseMap};
 use crate::tokenizer;
+use core::cmp::min;
 use counter::Counter;
-use postcard::{from_bytes, to_stdvec};
+use indexmap::IndexMap;
+use log::info;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use rayon::prelude::*;
 use regex::Regex;
-use serde::ser::SerializeStruct;
-use serde::Serialize;
-use serde::Serializer;
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
-use std::{fs, io::Write};
+use std::io::prelude::*;
+use std::{fs, io::Write, path};
+use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 #[pymodule]
 fn selmr(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    pyo3_log::init();
     m.add_class::<SELMR>()?;
-    m.add_class::<Phrase>()?;
-    m.add_class::<Context>()?;
     Ok(())
 }
 
@@ -95,14 +97,36 @@ impl SELMR {
     /// let s = SELMR();
     /// s.write("test.json", format="json")
     /// ```
-    pub fn write(&self, path: &str, format: &str) -> Result<(), PyErr> {
-        let mut f = fs::File::create(path)?;
+    pub fn write(&self, file: &str, format: &str) -> Result<(), PyErr> {
+        let mut f = fs::File::create(file)?;
         if format == "json" {
             let s = serde_json::to_string_pretty(&self).unwrap();
             write!(f, "{}", s).unwrap();
-        } else if format == "postcard" {
-            let s = to_stdvec(&self).unwrap();
-            let _ = f.write_all(&s);
+        } else if format == "zip" {
+            let mut zip = ZipWriter::new(f);
+            let s = serde_json::to_string_pretty(&self).unwrap();
+            match zip.start_file("data.json", FileOptions::default()) {
+                Ok(()) => match zip.write_all(s.as_bytes()) {
+                    Ok(()) => match zip.finish() {
+                        Ok(_) => return Ok(()),
+                        Err(_) => {
+                            return Err(PyErr::new::<PyTypeError, _>(
+                                "error closing finishing writing file in zip file",
+                            ))
+                        }
+                    },
+                    Err(_) => {
+                        return Err(PyErr::new::<PyTypeError, _>(
+                            "error writing to file in zip file",
+                        ))
+                    }
+                },
+                Err(_) => {
+                    return Err(PyErr::new::<PyTypeError, _>(
+                        "data.json not found in zip file",
+                    ))
+                }
+            }
         }
         Ok(())
     }
@@ -115,10 +139,10 @@ impl SELMR {
     /// let s = SELMR();
     /// s.read("test.json", format="json")
     /// ```
-    pub fn read(&mut self, path: &str, format: &str) -> Result<(), PyErr> {
-        let mut s = None;
+    pub fn read(&mut self, file: &str, format: &str) -> Result<(), PyErr> {
+        let mut s: Option<SELMR> = None;
         if format == "json" {
-            let data = fs::read_to_string(path);
+            let data = fs::read_to_string(file);
             match data {
                 Ok(data) => {
                     let from_str = serde_json::from_str(&data);
@@ -131,33 +155,52 @@ impl SELMR {
                 }
                 Err(e) => return Err(PyErr::new::<PyTypeError, _>(e)),
             }
-        } else if format == "postcard" {
-            let data = fs::read(path);
-            match data {
-                Ok(data) => {
-                    let from_bytes = from_bytes(&data);
-                    match from_bytes {
-                        Ok(from_bytes) => {
-                            s = from_bytes;
+        } else if format == "zip" {
+            let path = path::Path::new(file);
+            let zip_file = fs::File::open(path)?;
+            let mut archive = ZipArchive::new(zip_file).unwrap();
+            match archive.by_name("data.json") {
+                Ok(mut file_in_zip) => {
+                    let mut data = String::new();
+                    file_in_zip.read_to_string(&mut data).unwrap();
+                    let from_str = serde_json::from_str(&data);
+                    match from_str {
+                        Ok(from_str) => {
+                            s = from_str;
                         }
-                        Err(_) => return Err(PyErr::new::<PyTypeError, _>("Unable to parse")),
+                        Err(e) => {
+                            return Err(PyErr::new::<PyTypeError, _>(e.to_string()));
+                        }
                     }
                 }
-                Err(e) => return Err(PyErr::new::<PyTypeError, _>(e)),
-            }
+                Err(..) => {
+                    return Err(PyErr::new::<PyTypeError, _>(
+                        "data.json not found in zipfile.",
+                    ));
+                }
+            };
         }
         if let Some(selmr) = s {
             *self = selmr;
+            let mut unordered_contexts = HashMap::<Context, Counter<Phrase>>::new();
             for (p, contexts) in self.phrases.map.iter() {
                 for (c, &n) in contexts.map.iter() {
-                    self.contexts
-                        .map
+                    unordered_contexts
                         .entry(c.clone())
-                        .or_insert(PhraseCounter {
-                            map: Counter::<Phrase>::new(),
-                        })
-                        .map[&p] += n;
+                        .or_default()
+                        .insert(p.clone(), n);
                 }
+            }
+            self.contexts = ContextMap::new();
+            for (context, context_phrases) in unordered_contexts.iter() {
+                let ordered_context_phrases: IndexMap<Phrase, usize> =
+                    context_phrases.most_common_ordered().into_iter().collect();
+                self.contexts.map.insert(
+                    context.clone(),
+                    PhraseCounter {
+                        map: ordered_context_phrases,
+                    },
+                );
             }
         }
         Ok(())
@@ -170,32 +213,125 @@ impl SELMR {
     /// ```
     /// let s = SELMR();
     /// ```
-    pub fn add(&mut self, text: &str) {
+    pub fn add<'a>(&mut self, text: &str) {
         let binding = text.to_string();
-        let tokenized_text = tokenizer::tokenize(&binding);
-        let doc_phrases = ContextPhraseCounter::new(&tokenized_text, &self.params);
-        for ((left, phrase, right), &n) in doc_phrases.value.iter() {
+        let text = &tokenizer::tokenize(&binding);
+
+        info!(target: "selmr", "adding {} tokens", text.len());
+
+        let mut phrases = HashMap::<&'a [&'a str], Counter<(&'a [&'a str], &'a [&'a str])>>::new();
+        for l_len in self.params.min_context_len..self.params.max_context_len + 1 {
+            for r_len in self.params.min_context_len..self.params.max_context_len + 1 {
+                let mut new_phrases =
+                    HashMap::<&'a [&'a str], Counter<(&'a [&'a str], &'a [&'a str])>>::new();
+                let mut new_contexts =
+                    HashMap::<(&'a [&'a str], &'a [&'a str]), Counter<&'a [&'a str]>>::new();
+                for p_len in self.params.min_phrase_len..self.params.max_phrase_len + 1 {
+                    for (l, p, r) in (ContextPhraseWindowGenerator {
+                        text,
+                        l_len,
+                        p_len,
+                        r_len,
+                    }) {
+                        new_phrases
+                            .entry(p)
+                            .or_default()
+                            .entry((l, r))
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+                        new_contexts
+                            .entry((l, r))
+                            .or_default()
+                            .entry(p)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+                    }
+                }
+                new_phrases.retain(|_, cs| cs.len() >= self.params.min_phrase_keys);
+                new_contexts.retain(|_, ps| ps.len() >= self.params.min_context_keys);
+                let new_contexts: HashSet<_> = new_contexts.keys().cloned().collect();
+                for (p, ps) in new_phrases.iter() {
+                    for ((l, r), count) in ps.iter() {
+                        if new_contexts.contains(&(*l, *r)) {
+                            if l.len() > 1 {
+                                if let Some(cs) = phrases.get(p) {
+                                    if let Some(context_count) = cs.get(&(&l[1..], r)) {
+                                        if *context_count != *count {
+                                            phrases.entry(p).or_default()[&(*l, *r)] = *count;
+                                        }
+                                    }
+                                }
+                            }
+                            if r.len() > 1 {
+                                if let Some(cs) = phrases.get(p) {
+                                    if let Some(context_count) = cs.get(&(l, &r[..r.len() - 1])) {
+                                        if *context_count != *count {
+                                            phrases.entry(p).or_default()[&(*l, *r)] = *count;
+                                        }
+                                    }
+                                }
+                            }
+                            if l.len() > 1 && r.len() > 1 {
+                                if let Some(cs) = phrases.get(p) {
+                                    if let Some(context_count) =
+                                        cs.get(&(&l[1..], &r[..r.len() - 1]))
+                                    {
+                                        if *context_count != *count {
+                                            phrases.entry(p).or_default()[&(*l, *r)] = *count;
+                                        }
+                                    }
+                                }
+                            }
+                            if l.len() == 1 && r.len() == 1 {
+                                phrases.entry(p).or_default()[&(*l, *r)] = *count;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // construct the phrases and contexts of the current selmr struct
+        let mut unordered_phrases = HashMap::<Phrase, Counter<Context>>::new();
+        let mut unordered_contexts = HashMap::<Context, Counter<Phrase>>::new();
+        for (phrase, phrase_contexts) in phrases.iter() {
             let p = Phrase {
                 value: phrase.join(" "),
             };
-            let c = Context {
-                left_value: left.join(" "),
-                right_value: right.join(" "),
-            };
-            self.phrases
-                .map
-                .entry(p.clone())
-                .or_insert(ContextCounter {
-                    map: Counter::<Context>::new(),
-                })
-                .map[&c] += n;
-            self.contexts
-                .map
-                .entry(c.clone())
-                .or_insert(PhraseCounter {
-                    map: Counter::<Phrase>::new(),
-                })
-                .map[&p] += n;
+            for ((left, right), n) in phrase_contexts.iter() {
+                let c = Context {
+                    left_value: left.join(" "),
+                    right_value: right.join(" "),
+                };
+                unordered_phrases
+                    .entry(p.clone())
+                    .or_insert(Counter::<Context>::new())[&c] = *n;
+                unordered_contexts
+                    .entry(c)
+                    .or_insert(Counter::<Phrase>::new())[&p] = *n;
+            }
+        }
+        // sort the phrases and contexts counters
+        self.phrases = PhraseMap::new();
+        self.contexts = ContextMap::new();
+        for (phrase, phrase_contexts) in unordered_phrases.iter() {
+            let ordered_phrase_contexts: IndexMap<Context, usize> =
+                phrase_contexts.most_common_ordered().into_iter().collect();
+            self.phrases.map.insert(
+                phrase.clone(),
+                ContextCounter {
+                    map: ordered_phrase_contexts,
+                },
+            );
+        }
+        for (context, context_phrases) in unordered_contexts.iter() {
+            let ordered_context_phrases: IndexMap<Phrase, usize> =
+                context_phrases.most_common_ordered().into_iter().collect();
+            self.contexts.map.insert(
+                context.clone(),
+                PhraseCounter {
+                    map: ordered_context_phrases,
+                },
+            );
         }
     }
 
@@ -225,9 +361,7 @@ impl SELMR {
         match cs {
             Some(cs) => {
                 // take the most common contexts of the input phrase
-                let most_common_cs: HashSet<_> = cs
-                    .map
-                    .k_most_common_ordered(topcontexts)
+                let most_common_cs: HashSet<_> = cs.map[..min(cs.map.len(), topcontexts)]
                     .into_iter()
                     .map(|x| x.0)
                     .collect();
@@ -240,16 +374,14 @@ impl SELMR {
                             left_value: String::from(context.0),
                             right_value: String::from(context.1),
                         };
-                        let ps: HashSet<_> = self.contexts.map[&c]
-                            .map
-                            .k_most_common_ordered(topphrases)
+                        let len_p = min(self.contexts.map[&c].map.len(), topphrases);
+                        let ps: HashSet<_> = self.contexts.map[&c].map[..len_p]
                             .into_iter()
                             .map(|x| x.0)
                             .collect();
                         for p in &ps {
-                            let p_cs: HashSet<_> = self.phrases.map[&p]
-                                .map
-                                .k_most_common_ordered(topcontexts)
+                            let len_c = min(self.phrases.map[&p].map.len(), topcontexts);
+                            let p_cs: HashSet<_> = self.phrases.map[&p].map[..len_c]
                                 .into_iter()
                                 .map(|x| x.0)
                                 .collect();
@@ -261,10 +393,25 @@ impl SELMR {
                         // if there is not input context then
                         // for each context in the most common contexts cs update
                         // the counter with the phrases that fit in that context
+                        let mut ps: HashSet<_> = HashSet::new();
                         for c in &most_common_cs {
-                            for p in self.contexts.map[&c].map.keys() {
-                                most_similar[p] += 1;
+                            let len_c = min(self.contexts.map[&c].map.len(), topphrases);
+                            for p in self.contexts.map[&c].map[..len_c]
+                                .into_iter()
+                                .map(|x| x.0)
+                                .collect::<Vec<_>>()
+                            {
+                                ps.insert(p);
                             }
+                        }
+                        for p in ps {
+                            let len_p = min(self.phrases.map[&p].map.len(), topcontexts);
+                            let p_cs: HashSet<_> = self.phrases.map[&p].map[..len_p]
+                                .into_iter()
+                                .map(|x| x.0)
+                                .collect();
+                            most_similar[&p] =
+                                most_common_cs.intersection(&p_cs).collect::<Vec<_>>().len();
                         }
                     }
                 }
@@ -304,23 +451,19 @@ impl SELMR {
                     value: String::from(phrase),
                 });
                 match contexts {
-                    Some(contexts) => Ok(contexts
-                        .map
-                        .k_most_common_ordered(topn)
+                    Some(contexts) => Ok(contexts.map[..min(topn, contexts.map.len())]
                         .iter()
                         .map(|(context, count)| (context.to_string(), *count))
                         .collect()),
-                    None => {
-                        return Err(PyErr::new::<PyTypeError, _>(
-                            "Contexts of phrase not found: ".to_owned() + phrase,
-                        ))
-                    }
+                    None => Err(PyErr::new::<PyTypeError, _>(
+                        "Contexts of phrase not found: ".to_owned() + phrase,
+                    )),
                 }
             }
             None => match phrases {
                 Some(_phrases) => {
                     let mut new_counter = ContextCounter {
-                        map: Counter::<Context>::new(),
+                        map: IndexMap::<Context, usize>::new(),
                     };
                     for phrase in _phrases {
                         let contexts = self.phrases.map.get(&Phrase {
@@ -328,9 +471,10 @@ impl SELMR {
                         });
                         match contexts {
                             Some(contexts) => {
-                                let contexts = contexts.map.k_most_common_ordered(topn);
+                                let len_c = min(contexts.map.len(), topn);
+                                let contexts = &contexts.map[..len_c];
                                 for (context, count) in contexts.iter() {
-                                    new_counter.map[&context] += count;
+                                    new_counter.map[&context.clone()] += count;
                                 }
                             }
                             None => {
@@ -370,9 +514,7 @@ impl SELMR {
             right_value: String::from(context.1),
         });
         match phrases {
-            Some(phrases) => Ok(phrases
-                .map
-                .k_most_common_ordered(topn)
+            Some(phrases) => Ok(phrases.map[..min(phrases.map.len(), topn)]
                 .iter()
                 .map(|(phrase, count)| (phrase.to_string(), *count))
                 .collect()),
@@ -396,23 +538,22 @@ impl SELMR {
 
         for p in self.phrases.map.keys() {
             let mut new_counter = ContextCounter {
-                map: Counter::<Context>::new(),
+                map: IndexMap::<Context, usize>::new(),
             };
-            for (key, count) in self.phrases.map[&p].map.k_most_common_ordered(topn_phrases) {
-                new_counter.map[&key] = count;
+            let len_p = min(self.phrases.map[&p.clone()].map.len(), topn_phrases);
+            for (key, count) in &self.phrases.map[&p.clone()].map[..len_p] {
+                new_counter.map.insert(key.clone(), *count);
             }
             new_phrases.map.insert(p.clone(), new_counter);
         }
         self.phrases = new_phrases;
         for c in self.contexts.map.keys() {
             let mut new_counter = PhraseCounter {
-                map: Counter::<Phrase>::new(),
+                map: IndexMap::<Phrase, usize>::new(),
             };
-            for (key, count) in self.contexts.map[&c]
-                .map
-                .k_most_common_ordered(topn_contexts)
-            {
-                new_counter.map[&key] = count;
+            let len_c = min(self.contexts.map[&c].map.len(), topn_contexts);
+            for (key, count) in &self.contexts.map[&c].map[..len_c] {
+                new_counter.map.insert(key.clone(), *count);
             }
             new_contexts.map.insert(c.clone(), new_counter);
         }
@@ -438,7 +579,7 @@ impl SELMR {
         let mut results = HashMap::<(String, String, String), usize>::new();
         for p in self.phrases.map.keys() {
             for _result_p in re_p.find_iter(&p.value) {
-                for (c, count) in &self.phrases.map[&p].map {
+                for (c, count) in &self.phrases.map[&p.clone()].map {
                     for _result_l in re_l.find_iter(&c.left_value) {
                         for _result_r in re_r.find_iter(&c.right_value) {
                             results.insert(
@@ -463,7 +604,7 @@ impl Serialize for SELMR {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("selmr", 1)?;
+        let mut state = serializer.serialize_struct("selmr", 2)?;
         state.serialize_field("phrases", &self.phrases)?;
         state.serialize_field("params", &self.params)?;
         state.end()
@@ -496,114 +637,5 @@ impl<'a> Iterator for ContextPhraseWindowGenerator<'a> {
             self.text = &self.text[1..];
             Some(ret)
         }
-    }
-}
-
-/// Struct that contains Context Phrase combinations with their number of occurrences
-pub struct ContextPhraseCounter<'a> {
-    value: Counter<ContextPhraseTuple<'a>>,
-}
-
-impl<'a> ContextPhraseCounter<'a> {
-    /// Returns the ContextPhrase combinations for a given text
-    pub fn new(text: &'a Vec<&'a str>, params: &'a Params) -> Self {
-        let mut pset: Counter<ContextPhraseTuple> = Counter::new();
-        // create hashmap based on left and right context of length 1
-        for p_len in params.min_phrase_len..params.max_phrase_len + 1 {
-            pset.update(ContextPhraseWindowGenerator {
-                text,
-                l_len: 1,
-                p_len,
-                r_len: 1,
-            });
-        }
-        let mut h = HashMap::<(&'a [&'a str], &'a [&'a str]), HashSet<&'a [&'a str]>>::new();
-        for ((l, p, r), _count) in &pset {
-            h.entry((l, r)).or_default().insert(p);
-        }
-        pset = pset
-            .into_iter()
-            .filter(|((l, _, r), _)| h[&(*l, *r)].len() >= params.min_context_keys)
-            .collect();
-        let mut h = HashMap::<&'a [&'a str], HashSet<(&'a [&'a str], &'a [&'a str])>>::new();
-        for ((l, p, r), _count) in &pset {
-            h.entry(p).or_default().insert((l, r));
-        }
-        pset = pset
-            .into_iter()
-            .filter(|((_, p, _), _)| h[p].len() >= params.min_phrase_keys)
-            .collect();
-        for l_len in params.min_context_len..params.max_context_len + 1 {
-            for r_len in params.min_context_len..params.max_context_len + 1 {
-                let mut new_pset: Counter<ContextPhraseTuple> = Counter::new();
-                for p_len in params.min_phrase_len..params.max_phrase_len + 1 {
-                    new_pset.update(ContextPhraseWindowGenerator {
-                        text,
-                        l_len,
-                        p_len,
-                        r_len,
-                    });
-                }
-                let mut hashmap_c =
-                    HashMap::<(&'a [&'a str], &'a [&'a str]), HashSet<&'a [&'a str]>>::new();
-                for ((l, p, r), _count) in &new_pset {
-                    hashmap_c.entry((l, r)).or_default().insert(p);
-                }
-                new_pset = new_pset
-                    .into_iter()
-                    .filter(|((l, _, r), _)| hashmap_c[&(*l, *r)].len() >= params.min_context_keys)
-                    .collect();
-                let mut h =
-                    HashMap::<&'a [&'a str], HashSet<(&'a [&'a str], &'a [&'a str])>>::new();
-                for ((l, p, r), _count) in &new_pset {
-                    h.entry(p).or_default().insert((l, r));
-                }
-                new_pset = new_pset
-                    .into_iter()
-                    .filter(|((_, p, _), _)| h[p].len() >= params.min_phrase_keys)
-                    .collect();
-                for ((l, p, r), count) in new_pset.iter() {
-                    if let Some(item_count) = pset.get(&(&l[1..], p, r)) {
-                        if *item_count != *count {
-                            pset.insert((l, p, r), *count);
-                        }
-                    }
-                    if let Some(item_count) = pset.get(&(l, p, &r[..r.len() - 1])) {
-                        if *item_count != *count {
-                            pset.insert((l, p, r), *count);
-                        }
-                    }
-                    if let Some(item_count1) = pset.get(&(&l[1..], p, &r[..r.len() - 1])) {
-                        if *item_count1 != *count {
-                            if let Some(item_count2) = pset.get(&(l, p, &r[..r.len() - 1])) {
-                                if *item_count2 != *count {
-                                    if let Some(item_count3) = pset.get(&(&l[1..], p, r)) {
-                                        if *item_count3 != *count {
-                                            pset.insert((l, p, r), *count);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // let mut key_found = false;
-                    // let mut count_equal = false;
-                    // for l_idx in (1..l_len).rev() {
-                    //     for r_idx in (1..r_len).rev() {
-                    //         if let Some(item_count) = pset.get(&(&l[l_idx..], p, &r[..r.len()-r_idx])) {
-                    //             key_found = true;
-                    //             if *item_count == *count {
-                    //                 count_equal = true;
-                    //             }
-                    //         }
-                    //     }
-                    // }
-                    // if key_found && !count_equal {
-                    //     pset.insert((l, p, r), *count);
-                    // }
-                }
-            }
-        }
-        ContextPhraseCounter { value: pset }
     }
 }

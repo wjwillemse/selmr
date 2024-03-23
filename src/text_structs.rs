@@ -1,6 +1,10 @@
-use counter::Counter;
+use crate::serde::ser::SerializeSeq;
+use core::fmt::Formatter;
+use core::hash::Hash;
+use indexmap::IndexMap;
 use pyo3::prelude::*;
 use serde::de::MapAccess;
+use serde::de::SeqAccess;
 use serde::de::Visitor;
 use serde::ser::SerializeMap;
 use serde::Deserialize;
@@ -71,17 +75,24 @@ impl<'de> Deserialize<'de> for Phrase {
 }
 
 /// The counter with the number of occurrences of each Context
+#[derive(Debug)]
 pub struct ContextCounter {
     /// the map that contains the actual Counter
-    pub map: Counter<Context>,
+    pub map: IndexMap<Context, usize>,
 }
 
 impl ContextCounter {
     /// Returns an empty ContextCounter
     pub fn new() -> Self {
         ContextCounter {
-            map: Counter::<Context>::new(),
+            map: IndexMap::<Context, usize>::new(),
         }
+    }
+}
+
+impl Default for ContextCounter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -90,11 +101,11 @@ impl Serialize for ContextCounter {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(self.map.len()))?;
-        for (k, v) in &self.map {
-            map.serialize_entry(&k.to_string(), &v)?;
+        let mut seq = serializer.serialize_seq(Some(self.map.len()))?;
+        for (key, value) in &self.map {
+            seq.serialize_element(&(key.to_string(), value))?;
         }
-        map.end()
+        seq.end()
     }
 }
 
@@ -103,45 +114,75 @@ impl<'de> Deserialize<'de> for ContextCounter {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_map(ContextCounterVisitor::new())
+        Ok(ContextCounter {
+            map: deserializer.deserialize_seq(SeqVisitor(PhantomData))?,
+        })
     }
 }
 
-impl<'de> Visitor<'de> for ContextCounterVisitor {
-    type Value = ContextCounter;
+// Visitor to deserialize a *sequenced* `IndexMap`
+struct SeqVisitor<K, V>(PhantomData<(K, V)>);
 
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("ContextCounter")
+impl<'de, K, V> Visitor<'de> for SeqVisitor<K, V>
+where
+    K: Deserialize<'de> + Eq + Hash + std::fmt::Debug,
+    V: Deserialize<'de>,
+{
+    type Value = IndexMap<K, V>;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "a sequenced map")
     }
 
-    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
-        M: MapAccess<'de>,
+        A: SeqAccess<'de>,
     {
-        let mut map = ContextCounter::new(); //with_capacity(access.size_hint().unwrap_or(0));
-        while let Some((key, value)) = access.next_entry()? {
-            map.map.insert(key, value);
+        let mut map = IndexMap::new();
+        while let Some((key, value)) = seq.next_element()? {
+            map.insert(key, value);
         }
         Ok(map)
     }
 }
 
-struct ContextCounterVisitor {
-    marker: PhantomData<fn() -> ContextCounter>,
-}
+// impl<'de> Visitor<'de> for ContextCounterVisitor {
+//     type Value = ContextCounter;
 
-impl ContextCounterVisitor {
-    fn new() -> Self {
-        ContextCounterVisitor {
-            marker: PhantomData,
-        }
-    }
-}
+//     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+//         formatter.write_str("ContextCounter")
+//     }
+
+//     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+//     where
+//         M: MapAccess<'de>,
+//     {
+//         let mut map = ContextCounter::new(); //with_capacity(access.size_hint().unwrap_or(0));
+//         while let Some((key, value)) = access.next_entry()? {
+//             map.map.insert(key, value);
+//         }
+//         Ok(map)
+//     }
+// }
+
+// struct ContextCounterVisitor {
+//     marker: PhantomData<fn() -> ContextCounter>,
+// }
+
+// impl ContextCounterVisitor {
+//     fn new() -> Self {
+//         ContextCounterVisitor {
+//             marker: PhantomData,
+//         }
+//     }
+// }
 
 /// The counter with the number of occurrences of each Phrase
+#[derive(Deserialize, Serialize)]
 pub struct PhraseCounter {
     /// the map that contains the actual Counter
-    pub map: Counter<Phrase>,
+    #[serde(deserialize_with = "indexmap::map::serde_seq::deserialize")]
+    pub map: IndexMap<Phrase, usize>,
 }
 
 /// The counter with the number of occurrences of each Phrase
@@ -149,65 +190,72 @@ impl PhraseCounter {
     /// Returns an empty PhraseCounter
     pub fn new() -> Self {
         PhraseCounter {
-            map: Counter::<Phrase>::new(),
+            map: IndexMap::<Phrase, usize>::new(),
         }
     }
 }
 
-impl Serialize for PhraseCounter {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(self.map.len()))?;
-        for (k, v) in &self.map {
-            map.serialize_entry(&k.to_string(), v)?;
-        }
-        map.end()
+impl Default for PhraseCounter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl<'de> Deserialize<'de> for PhraseCounter {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_map(PhraseCounterVisitor::new())
-    }
-}
+// impl Serialize for PhraseCounter {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         let mut map = serializer.serialize_map(Some(self.map.len()))?;
+//         for (k, v) in &self.map {
+//             map.serialize_entry(&k.to_string(), v)?;
+//         }
+//         map.end()
+//     }
+// }
 
-impl<'de> Visitor<'de> for PhraseCounterVisitor {
-    type Value = PhraseCounter;
+// impl<'de> Deserialize<'de> for PhraseCounter {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         deserializer.deserialize_map(PhraseCounterVisitor::new())
+//     }
+// }
 
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("PhraseCounter")
-    }
+// impl<'de> Visitor<'de> for PhraseCounterVisitor {
+//     type Value = PhraseCounter;
 
-    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-    where
-        M: MapAccess<'de>,
-    {
-        let mut map = PhraseCounter::new(); //with_capacity(access.size_hint().unwrap_or(0));
-        while let Some((key, value)) = access.next_entry()? {
-            map.map.insert(key, value);
-        }
-        Ok(map)
-    }
-}
+//     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+//         formatter.write_str("PhraseCounter")
+//     }
 
-struct PhraseCounterVisitor {
-    marker: PhantomData<fn() -> PhraseCounter>,
-}
+//     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+//     where
+//         M: MapAccess<'de>,
+//     {
+//         let mut map = PhraseCounter::new(); //with_capacity(access.size_hint().unwrap_or(0));
+//         while let Some((key, value)) = access.next_entry()? {
+//             map.map.insert(key, value);
+//         }
+//         Ok(map)
+//     }
+// }
 
-impl PhraseCounterVisitor {
-    pub fn new() -> Self {
-        PhraseCounterVisitor {
-            marker: PhantomData,
-        }
-    }
-}
+// struct PhraseCounterVisitor {
+//     marker: PhantomData<fn() -> PhraseCounter>,
+// }
+
+// impl PhraseCounterVisitor {
+//     pub fn new() -> Self {
+//         PhraseCounterVisitor {
+//             marker: PhantomData,
+//         }
+//     }
+// }
 
 /// The HashMap of Phrases and their ContextCounter
+#[derive(Debug)]
 pub struct PhraseMap {
     /// the map contains the actual HashMap
     pub map: HashMap<Phrase, ContextCounter>,
@@ -219,6 +267,12 @@ impl PhraseMap {
         PhraseMap {
             map: HashMap::<Phrase, ContextCounter>::new(),
         }
+    }
+}
+
+impl Default for PhraseMap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

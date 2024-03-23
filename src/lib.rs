@@ -14,7 +14,7 @@ SELMRs produce explainable results without any randomness and enable explicit li
 with lexical, linguistical and terminological annotations. No model is trained and no
 dimensionality reduction is applied.
 
-# Usage
+# Installation in Rust
 
 This crate is [on crates.io](https://crates.io/crates/selmr) and can be
 used by adding `selmr` to your dependencies in your project"s `Cargo.toml`.
@@ -22,6 +22,15 @@ used by adding `selmr` to your dependencies in your project"s `Cargo.toml`.
 ```toml
 [dependencies]
 selmr = "1"
+```
+
+# Installation in Python
+
+The Python package is also on [pypi.org](https://pypi.org/project/pyselmr) and can be 
+installed with
+
+```python
+pip install pyselmr
 ```
 
 # Example: (multi-)word similarities
@@ -130,9 +139,9 @@ let expected = HashMap::from([
 assert!(actual == expected)
 ```
 
-To find similar multi-words, the algorithm counts for each multi-word in the corpus
-the number of contexts it has in common with (the most common) contexts of the input
-multi-word.
+The most similar multi-words are found by looking at the number of common contexts
+of an input multi-word and another mult-word in the corpus. The multi-words that have
+the highest number of contexts in common are the most 'similar' of the input multi-word.
 
 # Taking into account contexts
 
@@ -177,6 +186,43 @@ let expected = HashMap::from([
 ]);
 assert!(actual == expected)
 ```
+
+# Most similar multi-words
+
+To find similar words, the Jaccard distance of the contexts of the input multi-words and the
+contexts of each multi-word in the corpus is calculated. The most similar multi-words of input
+multi-word $p$ are calculated with
+
+$$
+\displaystyle\max_{k \in \mathrm{\mathbf{P}}} 1 - J(\operatorname{Contexts}(k), \operatorname{Contexts}(p))
+$$
+
+where
+- $\mathrm{\mathbf{P}}$ is the complete set of phrases,
+- $\operatorname{Contexts}(k)$ is the set of contexts of multi-word $k$,
+- $J(A, B)$ is the Jaccard index of set $A$ and set $B$ (and $1 - J(A, B)$ is also called the Jaccard distance).
+
+If an input context is also given then we restrict the phrases by replacing $\mathrm{\mathbf{P}}$ with
+$\operatorname{Phrases}(c)$, i.e. the phrases that fit into context $c$:
+
+$$
+\displaystyle\max_{k \in \operatorname{Phrases}(c)} 1 - J(\operatorname{Contexts}(k), \operatorname{Contexts}(p))
+$$
+
+where
+- $p$ is the input phrase and $c$ is the input context,
+- $\operatorname{Phrases}(c)$ is the set of phrases that fit into context $c$.
+
+Note that the most_similar function has an argument $topcontexts$ to specify the number
+of most common contexts that has to be used when calculating the most similar multi-words.
+Taking into account only a limited number of contexts yields better results. Similarly,
+if a context is specified, then the argument $topphrases$ specifies the number of most
+common multi-words that are used. Also note that we do not use the actual number of
+occurrences of multi-words and contexts.
+
+# Context-multi-word matches
+
+to do
 
 # Constructing a SELMR
 
