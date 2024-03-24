@@ -6,7 +6,6 @@ use indexmap::IndexMap;
 use log::info;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use rayon::prelude::*;
 use regex::Regex;
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
@@ -180,6 +179,7 @@ impl SELMR {
                 }
             };
         }
+        // the self.contexts is derived from self.phrases, and must be ordered
         if let Some(selmr) = s {
             *self = selmr;
             let mut unordered_contexts = HashMap::<Context, Counter<Phrase>>::new();
@@ -302,12 +302,8 @@ impl SELMR {
                     left_value: left.join(" "),
                     right_value: right.join(" "),
                 };
-                unordered_phrases
-                    .entry(p.clone())
-                    .or_insert(Counter::<Context>::new())[&c] = *n;
-                unordered_contexts
-                    .entry(c)
-                    .or_insert(Counter::<Phrase>::new())[&p] = *n;
+                unordered_phrases.entry(p.clone()).or_default()[&c] = *n;
+                unordered_contexts.entry(c).or_default()[&p] = *n;
             }
         }
         // sort the phrases and contexts counters
@@ -462,9 +458,7 @@ impl SELMR {
             }
             None => match phrases {
                 Some(_phrases) => {
-                    let mut new_counter = ContextCounter {
-                        map: IndexMap::<Context, usize>::new(),
-                    };
+                    let mut new_counter = Counter::<Context>::new();
                     for phrase in _phrases {
                         let contexts = self.phrases.map.get(&Phrase {
                             value: String::from(phrase),
@@ -474,7 +468,10 @@ impl SELMR {
                                 let len_c = min(contexts.map.len(), topn);
                                 let contexts = &contexts.map[..len_c];
                                 for (context, count) in contexts.iter() {
-                                    new_counter.map[&context.clone()] += count;
+                                    new_counter
+                                        .entry(context.clone())
+                                        .and_modify(|c| *c += count)
+                                        .or_insert(*count);
                                 }
                             }
                             None => {
@@ -484,8 +481,9 @@ impl SELMR {
                             }
                         }
                     }
-                    Ok(new_counter
-                        .map
+                    let ordered_new_counter: IndexMap<Context, usize> =
+                        new_counter.most_common_ordered().into_iter().collect();
+                    Ok(ordered_new_counter[..min(new_counter.len(), topn)]
                         .iter()
                         .map(|(context, count)| (context.to_string(), *count))
                         .collect())

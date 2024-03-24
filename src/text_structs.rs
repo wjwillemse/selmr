@@ -255,7 +255,6 @@ impl Default for PhraseCounter {
 // }
 
 /// The HashMap of Phrases and their ContextCounter
-#[derive(Debug)]
 pub struct PhraseMap {
     /// the map contains the actual HashMap
     pub map: HashMap<Phrase, ContextCounter>,

@@ -26,7 +26,7 @@ selmr = "1"
 
 # Installation in Python
 
-The Python package is also on [pypi.org](https://pypi.org/project/pyselmr) and can be 
+The Python package is also on [pypi.org](https://pypi.org/project/pyselmr) and can be
 installed with
 
 ```python
@@ -36,56 +36,69 @@ pip install pyselmr
 # Example: (multi-)word similarities
 
 Take for example the multi-word "has been suggested". The data structure based on the
-plain text data of 10.000 DBpedia pages (217 Mb) returns the following.
+plain text data of 10.000 DBpedia pages (217 Mb) returns the following top ten most
+similar multi-words
 
 ```rust
-let actual = selmr.most_similar("has been suggested", topn=10).unwrap();
+let actual = selmr.most_similar("has been suggested", 10).unwrap();
 let expected = HashMap::from([
-    ("has been suggested", 15),
-    ("is likely", 14),
-    ("is possible", 14),
-    ("is thought", 14),
-    ("appears", 13),
-    ("has been argued", 13),
-    ("is believed", 13),
-    ("is known", 12),
-    ("is speculated", 12),
-    ("can be shown", 11)
+    ("has been suggested", 25),
+    ("has been argued", 12),
+    ("has been claimed", 11),
+    ("has been speculated", 11),
+    ("is probable", 11),
+    ("is speculated", 11),
+    ("is argued", 10),
+    ("is clear", 10),
+    ("is more likely", 10),
+    ("can be argued", 9)
 ]);
 assert!(actual == expected)
 ```
 
 This shows the multi-words with the number of contexts that they have in common with "has been
-suggested" (see below). So "is likely" has 14 contexts in common with "has been suggested".
+suggested" (see below). So "is probable" has 11 contexts in common with "has been suggested".
 The more contexts that a multi-word has in common the more "similar" it is. Note that this
-similarity measure is only based on patterns in text; it is not a syntactical or semantic similarity
-measure.
+similarity measure is only based on patterns in text; it is not a syntactical or semantic
+similarity measure.
 
 An example with the name "Aldous Huxley" which returns the following.
 
 ```rust
-let actual = selmr.most_similar("Aldous Huxley", topn=10).unwrap();
+let actual = selmr.most_similar("Aldous Huxley", 10).unwrap();
 let expected = HashMap::from([
-    ("Aldous Huxley", 15),
-    ("Herman Melville", 5),
-    ("August Derleth", 5),
-    ("Ben Bova", 5),
-    ("Kurt Vonnegut", 5),
-    ("Anton Chekhov", 5),
-    ("Edgar Allan Poe", 5),
-    ("Frank Herbert", 5),
-    ("A E Housman", 4),
-    ("Adam Smith", 4),
+    ("Aldous Huxley", 25),
+    ("Ben Bova", 9),
+    ("Frank Herbert", 9),
+    ("A E Housman", 8),
+    ("Anatole France", 8),
+    ("Apuleius", 8),
+    ("Blaise Pascal", 8),
+    ("Clark Ashton Smith", 8),
+    ("Fridtjof Nansen", 8),
+    ("Henri Bergson", 8)
 ]);
 assert!(actual == expected)
 ```
 
-The results are based on the common contexts with "Aldous Huxley", with most of them
-American writers. For example "Herman Melville", these are: {("about ... at", 1),
-("article ... bibliography", 1), ("by ... at LibriVox", 1), ("by ... at Project", 1),
-and ("like ... and", 1)}. So in this case similarities are found because DBpedia contains
-a bibliography of their work and (some of) their works are available on LibriVox and
-Open Library.
+The results are based on the common contexts with "Aldous Huxley". For example
+the coinciding contexts of "Aldous Huxley" and "Ben Bova" are:
+
+```
+    ("Works by ... at LibriVox", 1),
+    ("Works by ... at Open", 1),
+    ("Works by ... at Project", 1),
+    ("about ... at", 1),
+    ("article ... bibliography", 1),
+    ("by ... at", 3),
+    ("by ... at LibriVox", 1),
+    ("by ... at Open", 1),
+    ("by ... at Project", 1)
+```
+
+So in this case similarities are found because DBpedia contains a bibliography of
+their work and (some of) their works are available on LibriVox, Open (Library) and
+Project (Gutenberg).
 
 # How does it work: multiset representations
 
@@ -104,7 +117,7 @@ words (the right side) of that multiword, with a certain maximum length and a ce
 minimum number of unique occurrences.
 
 ```rust
-let actual = selmr.get_contexts("has", topn=10).unwrap();
+let actual = selmr.get_contexts("has", 10).unwrap();
 let expected = HashMap::from([
     ("It ... been", 1001),
     ("it ... been", 991),
@@ -123,7 +136,7 @@ assert!(actual == expected)
 Below the 10 most common multi-words that fit in "it ... been" are listed.
 
 ```rust
-let actual = selmr.get_phrases(("it", "been"), topn=10).unwrap();
+let actual = selmr.get_phrases(("it", "been"), 10).unwrap();
 let expected = HashMap::from([
     ("has", 991),
     ("had", 385),
@@ -141,7 +154,7 @@ assert!(actual == expected)
 
 The most similar multi-words are found by looking at the number of common contexts
 of an input multi-word and another mult-word in the corpus. The multi-words that have
-the highest number of contexts in common are the most 'similar' of the input multi-word.
+the highest number of contexts in common are the most "similar" of the input multi-word.
 
 # Taking into account contexts
 
@@ -152,7 +165,7 @@ can restrict the results to similar words that occur in the input context. We ca
 restrict the output by providing the context "a ... with":
 
 ```rust
-let actual = selmr.most_similar(phrase="deal", context=("a", "with"), topn=10).unwrap();
+let actual = selmr.most_similar("deal", ("a", "with"), 10).unwrap();
 let expected = HashMap::from([
     ("deal", 25),
     ("contract", 7),
@@ -171,7 +184,7 @@ assert!(actual == expected)
 Compare these results to the results when the context is "to ... with":
 
 ```rust
-let actual = selmr.most_similar(phrase="deal", context=("to", "with"), topn=10).unwrap();
+let actual = selmr.most_similar("deal", ("to", "with"), 10).unwrap();
 let expected = HashMap::from([
     ("deal", 25),
     ("cope", 5),
@@ -198,7 +211,7 @@ $$
 $$
 
 where
-- $\mathrm{\mathbf{P}}$ is the complete set of phrases,
+- $\mathrm{\mathbf{P}}$ is the set of phrases that fits one of the contexts of multi-word $p$,
 - $\operatorname{Contexts}(k)$ is the set of contexts of multi-word $k$,
 - $J(A, B)$ is the Jaccard index of set $A$ and set $B$ (and $1 - J(A, B)$ is also called the Jaccard distance).
 
@@ -222,7 +235,18 @@ occurrences of multi-words and contexts.
 
 # Context-multi-word matches
 
-to do
+You can search in the data structure with regex. For example common nouns ending with "-ion"
+and start with one of the determiners "the", "a" or "an":
+
+```rust
+let binding = selmr
+    .matches(("the|a|an", "^[a-z]*ion$", ".*"))
+    .expect("REASON");
+let words_ion = binding
+    .keys()
+    .map(|(_, p, _)| p.as_str())
+    .collect::<Vec<_>>();
+```
 
 # Constructing a SELMR
 
@@ -236,7 +260,7 @@ selmr = SELMR(
     max_context_len=3,
     min_phrase_keys=1,
     min_context_keys=2,
-)
+);
 ```
 
 - min_phrase_len: the minimum number of single words in the multi-words
@@ -255,13 +279,27 @@ selmr.add("We went to the park to walk. And then we went to the city to shop.")
 Then you can run:
 
 ```rust
-r = s.most_similar("city")
+r = s.most_similar("city");
 assert!(r == [("city", 1), ("park", 1)])
 ```
 
 Contexts with more words on left or right will only be added if the number of occurrences is different, so
 if "the ... to" has two occurrences and "to the ... to" has also two occurrences then this latter context
 will not be added because it does not add any information.
+
+Write the data structure to a zip-file:
+
+```rust
+s.write(file_name, format="zip");
+```
+
+The zip-file contains one file named "data.json" that contains all data of the structure in json format.
+
+Read the data structure from a zip file:
+
+```rust
+s.read(file_name, format="zip");
+```
 
 */
 #![warn(missing_docs)]
