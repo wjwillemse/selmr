@@ -14,7 +14,7 @@ use std::{fs, io::Write, path};
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 #[pymodule]
-fn selmr(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn pyselmr(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     pyo3_log::init();
     m.add_class::<SELMR>()?;
     Ok(())
@@ -50,9 +50,7 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// use selmr::SELMR;
-    ///
-    /// let s = SELMR();
+    /// let s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
     /// ```
     #[new]
     #[pyo3(signature = (
@@ -93,8 +91,8 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
-    /// s.write("test.json", format="json")
+    /// let s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
+    /// s.write("test.json", "json").expect("REASON");
     /// ```
     pub fn write(&self, file: &str, format: &str) -> Result<(), PyErr> {
         let mut f = fs::File::create(file)?;
@@ -135,8 +133,8 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
-    /// s.read("test.json", format="json")
+    /// let mut s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
+    /// s.read("test.json", "json").expect("REASON");
     /// ```
     pub fn read(&mut self, file: &str, format: &str) -> Result<(), PyErr> {
         let mut s: Option<SELMR> = None;
@@ -211,7 +209,7 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
+    /// let s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
     /// ```
     pub fn add<'a>(&mut self, text: &str) {
         let binding = text.to_string();
@@ -290,7 +288,7 @@ impl SELMR {
                 }
             }
         }
-        // construct the phrases and contexts of the current selmr struct
+        // construct the (unordered) phrases and contexts
         let mut unordered_phrases = HashMap::<Phrase, Counter<Context>>::new();
         let mut unordered_contexts = HashMap::<Context, Counter<Phrase>>::new();
         for (phrase, phrase_contexts) in phrases.iter() {
@@ -306,9 +304,8 @@ impl SELMR {
                 unordered_contexts.entry(c).or_default()[&p] = *n;
             }
         }
-        // sort the phrases and contexts counters
+        // create the phrases with ordered ContextCounters
         self.phrases = PhraseMap::new();
-        self.contexts = ContextMap::new();
         for (phrase, phrase_contexts) in unordered_phrases.iter() {
             let ordered_phrase_contexts: IndexMap<Context, usize> =
                 phrase_contexts.most_common_ordered().into_iter().collect();
@@ -319,6 +316,8 @@ impl SELMR {
                 },
             );
         }
+        // create the contexts with ordered PhraseCounters
+        self.contexts = ContextMap::new();
         for (context, context_phrases) in unordered_contexts.iter() {
             let ordered_context_phrases: IndexMap<Phrase, usize> =
                 context_phrases.most_common_ordered().into_iter().collect();
@@ -336,7 +335,12 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
+    /// let mut s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
+    /// s.add("My sister lives in the city. My brother lives in the mountains.");
+    /// let actual = s.most_similar("sister", None, 25, 25, 15).unwrap();
+    /// let expect = [("brother".to_string(), 1), ("sister".to_string(), 1)]
+    ///     .iter().cloned().collect::<Vec<_>>();
+    /// assert_eq!(actual, expect);
     /// ```
     #[pyo3(signature = (phrase, context=None, topcontexts=25, topphrases=25, topn=15))]
     pub fn most_similar(
@@ -432,7 +436,12 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
+    /// let mut s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
+    /// s.add("My sister lives in the city. My brother lives in the mountains.");
+    /// let actual = s.get_contexts(Some("sister"), None, 15).unwrap();
+    /// let expect = [("My ... lives".to_string(), 1)]
+    ///     .iter().cloned().collect::<Vec<_>>();
+    /// assert_eq!(actual, expect);
     /// ```
     #[pyo3(signature = (phrase=None, phrases=None, topn=15))]
     pub fn get_contexts(
@@ -500,24 +509,37 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
+    /// let mut s = selmr::selmr::SELMR::new(1, 3, 1, 3, 1, 1, "en");
+    /// s.add("My sister lives in the city. My brother lives in the mountains.");
+    /// let actual = s.get_phrases(Some(("My", "lives")), 15).unwrap();
+    /// let expect = [("brother".to_string(), 1), ("sister".to_string(), 1)]
+    ///     .iter().cloned().collect::<Vec<_>>();
+    /// assert_eq!(actual, expect);
     /// ```
+    #[pyo3(signature = (context=None, topn=15))]
     pub fn get_phrases(
         &self,
-        context: (&str, &str),
+        context: Option<(&str, &str)>,
         topn: usize,
     ) -> Result<Vec<(String, usize)>, PyErr> {
-        let phrases = self.contexts.map.get(&Context {
-            left_value: String::from(context.0),
-            right_value: String::from(context.1),
-        });
-        match phrases {
-            Some(phrases) => Ok(phrases.map[..min(phrases.map.len(), topn)]
-                .iter()
-                .map(|(phrase, count)| (phrase.to_string(), *count))
-                .collect()),
+        match context {
+            Some(context) => {
+                let phrases = self.contexts.map.get(&Context {
+                    left_value: String::from(context.0),
+                    right_value: String::from(context.1),
+                });
+                match phrases {
+                    Some(phrases) => Ok(phrases.map[..min(phrases.map.len(), topn)]
+                        .iter()
+                        .map(|(phrase, count)| (phrase.to_string(), *count))
+                        .collect()),
+                    None => Err(PyErr::new::<PyTypeError, _>(
+                        "Context not found when calling get_phrases",
+                    )),
+                }
+            },
             None => Err(PyErr::new::<PyTypeError, _>(
-                "Context not found when calling get_phrases",
+                "No context given when calling get_phrases",
             )),
         }
     }
@@ -527,7 +549,6 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
     /// ```
     #[pyo3(signature = (topn_phrases=50, topn_contexts=50))]
     pub fn prune(&mut self, topn_phrases: usize, topn_contexts: usize) {
@@ -563,7 +584,6 @@ impl SELMR {
     /// # Example
     ///
     /// ```
-    /// let s = SELMR();
     /// ```
     pub fn matches(
         &self,

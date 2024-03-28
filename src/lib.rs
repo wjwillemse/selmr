@@ -39,8 +39,9 @@ Take for example the multi-word "has been suggested". The data structure based o
 plain text data of 10.000 DBpedia pages (217 Mb) returns the following top ten most
 similar multi-words
 
-```rust
-let actual = selmr.most_similar("has been suggested", 10).unwrap();
+```ignore
+use std::collections::HashMap;
+let actual = s.most_similar("has been suggested", 10).unwrap();
 let expected = HashMap::from([
     ("has been suggested", 25),
     ("has been argued", 12),
@@ -64,8 +65,9 @@ similarity measure.
 
 An example with the name "Aldous Huxley" which returns the following.
 
-```rust
-let actual = selmr.most_similar("Aldous Huxley", 10).unwrap();
+```ignore
+use std::collections::HashMap;
+let actual = s.most_similar("Aldous Huxley", 10).unwrap();
 let expected = HashMap::from([
     ("Aldous Huxley", 25),
     ("Ben Bova", 9),
@@ -84,7 +86,7 @@ assert!(actual == expected)
 The results are based on the common contexts with "Aldous Huxley". For example
 the coinciding contexts of "Aldous Huxley" and "Ben Bova" are:
 
-```
+```ignore
     ("Works by ... at LibriVox", 1),
     ("Works by ... at Open", 1),
     ("Works by ... at Project", 1),
@@ -93,7 +95,7 @@ the coinciding contexts of "Aldous Huxley" and "Ben Bova" are:
     ("by ... at", 3),
     ("by ... at LibriVox", 1),
     ("by ... at Open", 1),
-    ("by ... at Project", 1)
+    ("by ... at Project", 1),
 ```
 
 So in this case similarities are found because DBpedia contains a bibliography of
@@ -116,8 +118,9 @@ occurs with their number of occurrences. A context of a multi-word is a combinat
 words (the right side) of that multiword, with a certain maximum length and a certain
 minimum number of unique occurrences.
 
-```rust
-let actual = selmr.get_contexts("has", 10).unwrap();
+```ignore
+use std::collections::HashMap;
+let actual = s.get_contexts("has", 10).unwrap();
 let expected = HashMap::from([
     ("It ... been", 1001),
     ("it ... been", 991),
@@ -135,8 +138,9 @@ assert!(actual == expected)
 
 Below the 10 most common multi-words that fit in "it ... been" are listed.
 
-```rust
-let actual = selmr.get_phrases(("it", "been"), 10).unwrap();
+```ignore
+use std::collections::HashMap;
+let actual = s.get_phrases(("it", "been"), 10).unwrap();
 let expected = HashMap::from([
     ("has", 991),
     ("had", 385),
@@ -164,8 +168,9 @@ which is used as a noun and as a verb. By adding the context to the function cal
 can restrict the results to similar words that occur in the input context. We can
 restrict the output by providing the context "a ... with":
 
-```rust
-let actual = selmr.most_similar("deal", ("a", "with"), 10).unwrap();
+```ignore
+use std::collections::HashMap;
+let actual = s.most_similar("deal", ("a", "with"), 10).unwrap();
 let expected = HashMap::from([
     ("deal", 25),
     ("contract", 7),
@@ -183,8 +188,9 @@ assert!(actual == expected)
 
 Compare these results to the results when the context is "to ... with":
 
-```rust
-let actual = selmr.most_similar("deal", ("to", "with"), 10).unwrap();
+```ignore
+use std::collections::HashMap;
+let actual = s.most_similar("deal", ("to", "with"), 10).unwrap();
 let expected = HashMap::from([
     ("deal", 25),
     ("cope", 5),
@@ -238,9 +244,8 @@ occurrences of multi-words and contexts.
 You can search in the data structure with regex. For example common nouns ending with "-ion"
 and start with one of the determiners "the", "a" or "an":
 
-```rust
-let binding = selmr
-    .matches(("the|a|an", "^[a-z]*ion$", ".*"))
+```ignore
+let binding = s.matches(("the|a|an", "^[a-z]*ion$", ".*"))
     .expect("REASON");
 let words_ion = binding
     .keys()
@@ -252,14 +257,15 @@ let words_ion = binding
 
 Create an empty SELMR data structure with
 
-```rust
-selmr = SELMR(
-    min_phrase_len=1,
-    max_phrase_len=3,
-    min_context_len=1,
-    max_context_len=3,
-    min_phrase_keys=1,
-    min_context_keys=2,
+```ignore
+let selmr = selmr::selmr::SELMR::new(
+    1, // min_phrase_len=
+    3, // max_phrase_len
+    1, // min_context_len
+    3, // max_context_len
+    1, // min_phrase_keys
+    2, // min_context_keys
+    "en", // language
 );
 ```
 
@@ -269,17 +275,18 @@ selmr = SELMR(
 - min_context_len: the maximum number of single words in the left and right part of the contexts
 - min_phrase_keys: the minimum number of unique contexts each phrase must contain
 - min_context_keys: the minimum number of unique phrases each context must contain
+- language: the language of the data structure content
 
 Then add text with:
 
-```rust
-selmr.add("We went to the park to walk. And then we went to the city to shop.")
+```ignore
+s.add("We went to the park to walk. And then we went to the city to shop.")
 ```
 
 Then you can run:
 
-```rust
-r = s.most_similar("city");
+```ignore
+let r = s.most_similar("city");
 assert!(r == [("city", 1), ("park", 1)])
 ```
 
@@ -289,16 +296,16 @@ will not be added because it does not add any information.
 
 Write the data structure to a zip-file:
 
-```rust
-s.write(file_name, format="zip");
+```ignore
+s.write(file_name, "zip");
 ```
 
 The zip-file contains one file named "data.json" that contains all data of the structure in json format.
 
 Read the data structure from a zip file:
 
-```rust
-s.read(file_name, format="zip");
+```ignore
+s.read(file_name, "zip");
 ```
 
 */

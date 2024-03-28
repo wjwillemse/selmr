@@ -1,10 +1,8 @@
-use crate::serde::ser::SerializeSeq;
 use core::fmt::Formatter;
 use core::hash::Hash;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
 use serde::de::MapAccess;
-use serde::de::SeqAccess;
 use serde::de::Visitor;
 use serde::ser::SerializeMap;
 use serde::Deserialize;
@@ -101,11 +99,13 @@ impl Serialize for ContextCounter {
     where
         S: Serializer,
     {
-        let mut seq = serializer.serialize_seq(Some(self.map.len()))?;
+        // the IndexMap is serialized as a HashMap
+        // this makes the json file more readable
+        let mut map = serializer.serialize_map(Some(self.map.len()))?;
         for (key, value) in &self.map {
-            seq.serialize_element(&(key.to_string(), value))?;
+            map.serialize_entry(&key.to_string(), value)?;
         }
-        seq.end()
+        map.end()
     }
 }
 
@@ -115,31 +115,31 @@ impl<'de> Deserialize<'de> for ContextCounter {
         D: Deserializer<'de>,
     {
         Ok(ContextCounter {
-            map: deserializer.deserialize_seq(SeqVisitor(PhantomData))?,
+            map: deserializer.deserialize_map(IndexMapVisitor(PhantomData))?,
         })
     }
 }
 
-// Visitor to deserialize a *sequenced* `IndexMap`
-struct SeqVisitor<K, V>(PhantomData<(K, V)>);
+struct IndexMapVisitor<K, V>(PhantomData<(K, V)>);
 
-impl<'de, K, V> Visitor<'de> for SeqVisitor<K, V>
+impl<'de, K, V> Visitor<'de> for IndexMapVisitor<K, V>
 where
-    K: Deserialize<'de> + Eq + Hash + std::fmt::Debug,
+    K: Deserialize<'de> + std::hash::Hash + std::cmp::Eq,
     V: Deserialize<'de>,
 {
     type Value = IndexMap<K, V>;
 
     fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(formatter, "a sequenced map")
+        write!(formatter, "ContextCounter")
     }
 
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
-        A: SeqAccess<'de>,
+        A: MapAccess<'de>,
     {
+        // Deserializing to IndexMap using the order in the json file
         let mut map = IndexMap::new();
-        while let Some((key, value)) = seq.next_element()? {
+        while let Some((key, value)) = seq.next_entry()? {
             map.insert(key, value);
         }
         Ok(map)
