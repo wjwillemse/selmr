@@ -1,3 +1,4 @@
+use core::cmp::min;
 use core::fmt::Formatter;
 use core::hash::Hash;
 use indexmap::IndexMap;
@@ -21,6 +22,17 @@ pub struct Context {
     pub left_value: String,
     /// The string of the following (right) words of the Context
     pub right_value: String,
+}
+
+impl Context {
+    /// Returns an Phrase
+    pub fn new(value: &str) -> Self {
+        let c = value.split(" ... ").collect::<Vec<&str>>();
+        Context {
+            left_value: c[0].to_string(),
+            right_value: c[1].to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Context {
@@ -52,6 +64,15 @@ impl<'de> Deserialize<'de> for Context {
 pub struct Phrase {
     /// the string of the words in the Phrase
     pub value: String,
+}
+
+impl Phrase {
+    /// Returns an Phrase
+    pub fn new(value: &str) -> Self {
+        Phrase {
+            value: value.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for Phrase {
@@ -267,6 +288,15 @@ impl PhraseMap {
             map: HashMap::<Phrase, ContextCounter>::new(),
         }
     }
+    /// Returns the topn items from the context multiset of the phrase
+    pub fn get(&self, phrase: &Phrase, topn: usize) -> Option<HashMap<&Context, &usize>> {
+        let contexts = self.map.get(phrase);
+        contexts.map(|contexts| {
+            contexts.map[..min(contexts.map.len(), topn)]
+                .iter()
+                .collect()
+        })
+    }
 }
 
 impl Default for PhraseMap {
@@ -342,6 +372,11 @@ impl ContextMap {
         ContextMap {
             map: HashMap::<Context, PhraseCounter>::new(),
         }
+    }
+    /// Returns the topn items from the phrase multiset of the context
+    pub fn get(&self, context: &Context, topn: usize) -> Option<HashMap<&Phrase, &usize>> {
+        let phrases = self.map.get(context);
+        phrases.map(|phrases| phrases.map[..min(phrases.map.len(), topn)].iter().collect())
     }
 }
 

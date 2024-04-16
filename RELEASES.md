@@ -1,3 +1,10 @@
+Version 0.3.0 (2024-04-15)
+==========================
+
+- added distance measures for most_similar: count, jaccard and weighted_jaccard
+- restructured code for performance and readability
+- separated Python bindings (in PYSELMR) and SELMR struct
+
 Version 0.2.0 (2024-03-24)
 ==========================
 
