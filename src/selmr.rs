@@ -397,9 +397,8 @@ impl SELMR {
     ///
     /// let mut s = SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
-    /// let actual = s.most_similar(Phrase::new("2"), None, 25, 25, 15, "count").unwrap();
-    /// let expect = [(Phrase::new("2"), 5.0), (Phrase::new("1"), 1.0)]
-    ///     .iter().cloned().collect::<Vec<_>>();
+    /// let actual = s.most_similar("2".to_string(), None, 25, 25, 15, "count").unwrap();
+    /// let expect = [("2".to_string(), 5.0), ("1".to_string(), 1.0)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
     ///
@@ -411,9 +410,8 @@ impl SELMR {
     ///
     /// let mut s = selmr::selmr::SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
-    /// let actual = s.most_similar(Phrase::new("2"), None, 25, 25, 15, "jaccard").unwrap();
-    /// let expect = [(Phrase::new("2"), 1.0), (Phrase::new("1"), 0.2)]
-    ///     .iter().cloned().collect::<Vec<_>>();
+    /// let actual = s.most_similar("2".to_string(), None, 25, 25, 15, "jaccard").unwrap();
+    /// let expect = [("2".to_string(), 1.0), ("1".to_string(), 0.2)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
     ///
@@ -425,24 +423,25 @@ impl SELMR {
     ///
     /// let mut s = selmr::selmr::SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
-    /// let actual = s.most_similar(Phrase::new("2"), None, 25, 25, 15, "weighted_jaccard").unwrap();
-    /// let expect = [(Phrase::new("2"), 1.0), (Phrase::new("1"), 0.16666667)]
-    ///     .iter().cloned().collect::<Vec<_>>();
+    /// let actual = s.most_similar("2".to_string(), None, 25, 25, 15, "weighted_jaccard").unwrap();
+    /// let expect = [("2".to_string(), 1.0), ("1".to_string(), 0.16666667)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
     pub fn most_similar(
         &self,
-        phrase: Phrase,
-        context: Option<Context>,
+        phrase: String,
+        context: Option<String>,
         topcontexts: usize,
         topphrases: usize,
         topn: usize,
         measure: &str,
-    ) -> Result<Vec<(Phrase, f32)>, String> {
-        if let Some(multiset) = self.get_phrase_contexts(&phrase, topcontexts) {
+    ) -> Result<Vec<(String, f32)>, String> {
+        let p = Phrase::new(phrase.as_str());
+        let c = context.map(|c|Context::new(c.as_str()));
+        if let Some(multiset) = self.get_phrase_contexts(&p, topcontexts) {
             self.most_similar_from_multiset(
                 &multiset,
-                context,
+                c,
                 topcontexts,
                 topphrases,
                 topn,
@@ -462,7 +461,7 @@ impl SELMR {
         topphrases: usize,
         topn: usize,
         measure: &str,
-    ) -> Result<Vec<(Phrase, f32)>, String> {
+    ) -> Result<Vec<(String, f32)>, String> {
         match self.get_phrases_to_evaluate(&multiset, context, topphrases) {
             Ok(phrases_to_evaluate) => self.most_similar_from_phrases(
                 multiset,
@@ -514,8 +513,8 @@ impl SELMR {
         topcontexts: usize,
         topn: usize,
         measure: &str,
-    ) -> Result<Vec<(Phrase, f32)>, String> {
-        let mut result = Vec::<(Phrase, f32)>::new();
+    ) -> Result<Vec<(String, f32)>, String> {
+        let mut result = Vec::<(String, f32)>::new();
         match measure {
             "count" | "jaccard" => {
                 let set_b: HashSet<&Context> = input_phrase_multiset.keys().cloned().collect();
@@ -531,7 +530,7 @@ impl SELMR {
                         "jaccard" => jaccard_index(set_a, &set_b),
                         _ => 0.0,
                     };
-                    result.push((phrase.clone().clone(), value));
+                    result.push((phrase.to_string(), value));
                 }
             }
             "weighted_jaccard" => {
@@ -539,7 +538,7 @@ impl SELMR {
                 for phrase in phrases_to_evaluate {
                     if let Some(multiset_a) = &self.phrases.get(phrase, topcontexts) {
                         let value: f32 = weighted_jaccard_index(multiset_a, input_phrase_multiset);
-                        result.push((phrase.clone().clone(), value));
+                        result.push((phrase.to_string(), value));
                     } else {
                         return Err(format!("Phrase not found: {}", phrase))
                     }
@@ -547,7 +546,6 @@ impl SELMR {
             }
             m => return Err(format!("Measure not implemented: {}", m)),
         }
-        println!("{:?}", result);
         // sort result based on measure
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         // select topn results
@@ -567,7 +565,8 @@ impl SELMR {
     /// let mut s = selmr::selmr::SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
     /// let actual = s.get_phrase_contexts(&Phrase::new("1"), 15).unwrap();
-    /// let expect = [(&Context::new("a ... b"), &1)].iter().cloned().collect::<HashMap<_, _>>();
+    /// let context = Context::new("a ... b");
+    /// let expect = [(&context, &1)].iter().cloned().collect::<HashMap<_, _>>();
     /// assert_eq!(actual, expect);
     /// ```
     ///

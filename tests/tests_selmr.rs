@@ -13,13 +13,13 @@ pub fn most_similar_test() {
         1, 3, 1, 3, 1, 3, 1, 1, "en"
     );
 
-    let actual = s.most_similar(Phrase::new("bump"), None, 15, 15, 15, "count");
+    let actual = s.most_similar("bump".to_string(), None, 15, 15, 15, "count");
 
     match actual {
         Ok(actual) => {
             assert_eq!(
                 actual,
-                [(Phrase::new("bump"), 3.0), (Phrase::new("bump bump"), 2.0)]
+                [("bump".to_string(), 3.0), ("bump bump".to_string(), 2.0)]
             );
         }
         Err(_) => todo!(),

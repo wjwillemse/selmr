@@ -107,20 +107,18 @@ impl PYSELMR {
     #[pyo3(signature = (phrase, context=None, topcontexts=25, topphrases=25, topn=15, measure="count"))]
     pub fn most_similar(
         &self,
-        phrase: &str,
-        context: Option<&str>,
+        phrase: String,
+        context: Option<String>,
         topcontexts: usize,
         topphrases: usize,
         topn: usize,
         measure: &str,
     ) -> Result<Vec<(String, f32)>, PyErr> {
-        let p = Phrase::new(phrase);
-        let c = context.map(Context::new);
         match self
             .selmr
-            .most_similar(p, c, topcontexts, topphrases, topn, measure)
+            .most_similar(phrase, context, topcontexts, topphrases, topn, measure)
         {
-            Ok(r) => Ok(r.iter().map(|(p, v)| (p.to_string(), *v)).collect()),
+            Ok(r) => Ok(r),
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
     }
@@ -154,7 +152,7 @@ impl PYSELMR {
             topn,
             measure,
         ) {
-            Ok(r) => Ok(r.iter().map(|(p, v)| (p.to_string(), *v)).collect()),
+            Ok(r) => Ok(r),
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
     }
