@@ -14,12 +14,3 @@ with lexical, linguistical and terminological annotations. No model is trained a
 dimensionality reduction is applied.
 
 For information on how to use this package, please look [here](https://www.mangosaurus.nl/posts/introduction-to-selmr/).
-
-# Installation in Rust
-
-This crate is [on crates.io](https://crates.io/crates/selmr) and can be
-used by adding `selmr` to your dependencies in your project"s `Cargo.toml`.
-
-```toml
-[dependencies]
-selmr = "1"

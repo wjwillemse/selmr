@@ -16,16 +16,6 @@ dimensionality reduction is applied.
 
 For information on how to use this package, please look [here](https://www.mangosaurus.nl/posts/introduction-to-selmr/).
 
-# Installation in Rust
-
-This crate is [on crates.io](https://crates.io/crates/selmr) and can be
-used by adding `selmr` to your dependencies in your project"s `Cargo.toml`.
-
-```toml
-[dependencies]
-selmr = "1"
-```
-
 */
 #![warn(missing_docs)]
 
@@ -40,3 +30,5 @@ pub mod selmr;
 pub mod text_structs;
 /// Module with tokenizer
 pub mod tokenizer;
+/// Module with Hierarchical Agglomerative Clustering (HAC)
+pub mod hac;
