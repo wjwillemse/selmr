@@ -112,7 +112,7 @@ impl PySELMR {
             min_context_keys,
             language: language.to_string(),
         };
-        self.selmr.add(text, &params)
+        self.selmr.add(text, Some(&params))
     }
     /// Get the phrases index of text
     pub fn get_phrases_index_of(
@@ -146,69 +146,29 @@ impl PySELMR {
         let (key, _) = self.selmr.contexts.map.get_index(idx).unwrap();
         key.to_string()
     }
-    /// Returns the most similar phrases based on common contexts
-    #[pyo3(signature = (phrase, context=None, multiset_topn=25, topn=15, measure="count"))]
-    pub fn most_similar_phrase(
-        &self,
-        phrase: String,
-        context: Option<String>,
-        multiset_topn: usize,
-        topn: usize,
-        measure: &str,
-    ) -> Result<Vec<(String, f32)>, PyErr> {
-        let phrase = Text::word(phrase.as_str());
-        let constraint = context.map(|c|Text::context(c.as_str()));
-        match self.selmr.most_similar_phrase(
-            phrase, 
-            constraint, 
-            Some(multiset_topn), 
-            Some(topn), 
-            measure)
-        {
-            Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
-            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-        }
-    }
-
-    /// Context equivalent of most_similar
-    #[pyo3(signature = (context, phrase=None, multiset_topn=25, topn=15, measure="count"))]
-    pub fn most_similar_context(
-        &self,
-        context: String,
-        phrase: Option<String>,
-        multiset_topn: usize,
-        topn: usize,
-        measure: &str,
-    ) -> Result<Vec<(String, f32)>, PyErr> {
-        let context = Text::context(context.as_str());
-        let constraint = phrase.map(|p|Text::word(p.as_str()));
-        match self.selmr.most_similar_context(
-            context, 
-            constraint, 
-            Some(multiset_topn), 
-            Some(topn), 
-            measure)
-        {
-            Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
-            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-        }
-    }
-
-    /// Short name for most_similar_phrases
-    #[pyo3(signature = (phrase, context=None, multiset_topn=25, topn=15, measure="count"))]
+    /// Returns the most similar texts based on common contexts
+    #[pyo3(signature = (text, constraint=None, multiset_topn=25, topn=15, measure="count"))]
     pub fn most_similar(
         &self,
-        phrase: String,
-        context: Option<String>,
+        text: String,
+        constraint: Option<String>,
         multiset_topn: usize,
         topn: usize,
         measure: &str,
     ) -> Result<Vec<(String, f32)>, PyErr> {
-        self.most_similar_phrase(
-            phrase, context, multiset_topn, topn, measure
-        )
+        let text = Text::extract(text.as_str());
+        let constraint = constraint.map(|c|Text::context(c.as_str()));
+        match self.selmr.most_similar(
+            text, 
+            constraint, 
+            Some(multiset_topn), 
+            Some(topn), 
+            measure)
+        {
+            Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
+            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
+        }
     }
-
     /// Find the most similar phrases from a given multiset
     #[pyo3(signature = (multiset, constraint=None, multiset_topn=25, topn=15, measure="count"))]
     pub fn most_similar_from_multiset(
@@ -240,75 +200,6 @@ impl PySELMR {
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
     }
-
-    // /// Find the most similar phrases from a given multiset
-    // #[pyo3(signature = (multiset, context=None, topcontexts=25, topphrases=25, topn=15, measure="count"))]
-    // pub fn most_similar_from_context_multiset(
-    //     &self,
-    //     multiset: HashMap<&str, usize>,
-    //     context: Option<&str>,
-    //     topcontexts: usize,
-    //     topphrases: usize,
-    //     topn: usize,
-    //     measure: &str,
-    // ) -> Result<Vec<(String, f32)>, PyErr> {
-    //     let keys = multiset
-    //         .keys()
-    //         .map(|c| Text::context(c))
-    //         .collect::<Vec<_>>();
-    //     let values = multiset.values().collect::<Vec<_>>();
-    //     let mut multiset = IndexMap::<&Text, usize>::new();
-    //     for idx in 0..keys.len() {
-    //         multiset.insert(&keys[idx], *values[idx]);
-    //     }
-    //     let context = context.map(Text::context);
-    //     match self.selmr.most_similar_from_context_multiset(
-    //         &multiset,
-    //         context,
-    //         Some(topcontexts),
-    //         Some(topphrases),
-    //         Some(topn),
-    //         measure,
-    //     ) {
-    //         Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
-    //         Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-    //     }
-    // }
-
-    // /// Context equivalent of most_similar_from_context_multiset
-    // #[pyo3(signature = (multiset, phrase=None, topphrases=25, topcontexts=25, topn=15, measure="count"))]
-    // pub fn most_similar_from_phrase_multiset(
-    //     &self,
-    //     multiset: HashMap<&str, usize>,
-    //     phrase: Option<&str>,
-    //     topphrases: usize,
-    //     topcontexts: usize,
-    //     topn: usize,
-    //     measure: &str,
-    // ) -> Result<Vec<(String, f32)>, PyErr> {
-    //     let keys = multiset
-    //         .keys()
-    //         .map(|p| Text::word(p))
-    //         .collect::<Vec<_>>();
-    //     let values = multiset.values().collect::<Vec<_>>();
-    //     let mut multiset = IndexMap::<&Text, usize>::new();
-    //     for idx in 0..keys.len() {
-    //         multiset.insert(&keys[idx], *values[idx]);
-    //     }
-    //     let phrase = phrase.map(Text::word);
-    //     match self.selmr.most_similar_from_phrase_multiset(
-    //         &multiset,
-    //         phrase,
-    //         Some(topphrases),
-    //         Some(topcontexts),
-    //         Some(topn),
-    //         measure,
-    //     ) {
-    //         Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
-    //         Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-    //     }
-    // }
-
     /// Get the topn associations of a text
     #[pyo3(signature = (text="", topn=15))]
     pub fn get_multiset(
@@ -322,19 +213,6 @@ impl PySELMR {
             None => Err(PyErr::new::<PyTypeError, _>("Text not found")),
         }
     }
-    // /// Get the topn context of the phrase
-    // #[pyo3(signature = (phrase="", topn=15))]
-    // pub fn get_phrase_contexts(
-    //     &self,
-    //     phrase: &str,
-    //     topn: usize,
-    // ) -> Result<HashMap<String, usize>, PyErr> {
-    //     let phrase = Text::word(phrase);
-    //     match self.selmr.get_phrase_contexts(&phrase, Some(topn)) {
-    //         Some(r) => Ok(r.iter().map(|(c, v)| (c.to_string(), *v)).collect()),
-    //         None => Err(PyErr::new::<PyTypeError, _>("Phrase not found")),
-    //     }
-    // }
     /// Get the topn context of the phrases
     #[pyo3(signature = (texts, topn=15))]
     pub fn get_list_multiset(
@@ -348,53 +226,12 @@ impl PySELMR {
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
     }
-    /// Get the topn context of the phrases
-    #[pyo3(signature = (phrases, topn=15))]
-    pub fn get_phrases_contexts(
-        &self,
-        phrases: Vec<&str>,
-        topn: usize,
-    ) -> Result<HashMap<String, usize>, PyErr> {
-        let phrases = phrases.iter().map(|p| Text::word(p)).collect();
-        match self.selmr.get_phrases_contexts(&phrases, Some(topn)) {
-            Ok(r) => Ok(r.iter().map(|(c, v)| (c.to_string(), *v)).collect()),
-            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-        }
-    }
-    // /// Get the topn phrasesof the context
-    // #[pyo3(signature = (context, topn=15))]
-    // pub fn get_context_phrases(
-    //     &self,
-    //     context: &str,
-    //     topn: usize,
-    // ) -> Result<HashMap<String, usize>, PyErr> {
-    //     let context = Text::context(context);
-    //     match self.selmr.get_context_phrases(&context, Some(topn)) {
-    //         Some(r) => Ok(r.iter().map(|(p, v)| (p.to_string(), *v)).collect()),
-    //         None => Err(PyErr::new::<PyTypeError, _>("Context not found")),
-    //     }
-    // }
-    /// Get the topn phrasesof the contexts
-    #[pyo3(signature = (contexts, topn=15))]
-    pub fn get_contexts_phrases(
-        &self,
-        contexts: Vec<&str>,
-        topn: usize,
-    ) -> Result<HashMap<String, usize>, PyErr> {
-        let contexts = contexts.iter().map(|c| Text::context(c)).collect();
-        match self.selmr.get_contexts_phrases(&contexts, Some(topn)) {
-            Ok(r) => Ok(r.iter().map(|(p, v)| (p.to_string(), *v)).collect()),
-            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-        }
-    }
-
     /// Prunes a SELMR data structure
     #[pyo3(signature = (topn_phrases=50, topn_contexts=50))]
     pub fn prune(&mut self, topn_phrases: usize, topn_contexts: usize
     ) {
         self.selmr.prune(topn_phrases, topn_contexts)
     }
-
     /// Filters the phrase-context combinations on given regexes
     pub fn phrase_context_matches(
         &self,

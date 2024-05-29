@@ -244,6 +244,22 @@ impl TextMap {
         }
         reversed
     }
+    /// Merge the other TextMap into the current one
+    pub fn merge(&mut self, other: &TextMap) {
+        for (text, multiset) in other.map.iter() {
+            for (item, new_n) in multiset.map.iter() {
+                self.map
+                    .entry(text.clone())
+                    .or_default()
+                    .map
+                    .entry(item.clone())
+                    .and_modify(|n| *n += new_n)
+                    .or_insert(*new_n);
+            }
+        }
+    }
+
+
 }
 
 impl Default for TextMap {

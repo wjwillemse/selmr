@@ -35,6 +35,43 @@ pub struct Params {
     pub language: String,
 }
 
+impl Default for Params {
+    fn default() -> Self {
+        Self::minimal()
+    }
+}
+
+impl Params {
+    /// the minimal default params set
+    pub fn minimal() -> Self {
+        Params {
+            min_phrase_len: 1,
+            max_phrase_len: 3,
+            min_left_context_len: 1,
+            max_left_context_len: 3,
+            min_right_context_len: 1,
+            max_right_context_len: 3,
+            min_phrase_keys: 2,
+            min_context_keys: 2,
+            language: "en".to_string(),
+        }
+    }
+    /// the params set for test purposes
+    pub fn test() -> Self {
+        Params{
+            min_phrase_len: 1,
+            max_phrase_len: 3,
+            min_left_context_len: 1,
+            max_left_context_len: 3,
+            min_right_context_len: 1,
+            max_right_context_len: 3,
+            min_phrase_keys: 1,
+            min_context_keys: 1,
+            language: "en".to_string(),
+        }
+    }
+}
+
 /// The SELMR data structure
 #[derive(Deserialize, Clone)]
 pub struct SELMR {
@@ -114,20 +151,9 @@ impl SELMR {
             contexts: TextMap::new(),
             phrases_tree: None,
             contexts_tree: None,
-            params: Params {
-                min_phrase_len: 1,
-                max_phrase_len: 3,
-                min_left_context_len: 1,
-                max_left_context_len: 3,
-                min_right_context_len: 1,
-                max_right_context_len: 3,
-                min_phrase_keys: 5,
-                min_context_keys: 5,
-                language: "en".to_string(),
-            },
+            params: Params::minimal(),
         }
     }
-
     /// Write SELMR data structure to a file
     ///
     /// # Example
@@ -215,56 +241,18 @@ impl SELMR {
         }
         Ok(())
     }
-
     /// merge the context of another SELMR struct into the current one
     pub fn merge(
         &mut self, 
         other: &SELMR
     ) {
         // merge the content of s with that of the current struct
-        for (new_p, new_contexts) in other.phrases.map.iter() {
-            for (new_c, new_count) in new_contexts.map.iter() {
-                self.phrases
-                    .map
-                    .entry(new_p.clone())
-                    .or_default()
-                    .map
-                    .entry(new_c.clone())
-                    .and_modify(|count| *count += new_count)
-                    .or_insert(*new_count);
-            }
-        }
+        self.phrases.merge(&other.phrases);
+        self.contexts = self.phrases.swap();
         // to do: perform actual merge instead of replace
         self.phrases_tree = other.phrases_tree.clone();
         self.contexts_tree = other.contexts_tree.clone();
-        self.contexts = self.phrases.swap()
-        // self.create_and_order_contexts();
     }
-
-    // fn create_and_order_contexts(&mut self) {
-    //     // the self.contexts is derived from self.phrases, and must be ordered
-    //     self.contexts = TextMap::new();
-    //     let mut unordered_contexts = IndexMap::<Text, Counter<Text>>::new();
-    //     for (p, contexts) in self.phrases.map.iter() {
-    //         for (c, &n) in contexts.map.iter() {
-    //             unordered_contexts
-    //                 .entry(c.clone())
-    //                 .or_default()
-    //                 .insert(p.clone(), n);
-    //         }
-    //     }
-    //     for (context, context_phrases) in unordered_contexts.iter() {
-    //         let ordered_context_phrases: IndexMap<Text, usize> =
-    //             context_phrases.most_common_ordered().into_iter().collect();
-    //         self.contexts.map.insert(
-    //             context.clone(),
-    //             TextCounter {
-    //                 map: ordered_context_phrases,
-    //             },
-    //         );
-    //     }
-    // }
-
     /// add text data to SELMR data structure
     ///
     /// # Example
@@ -275,20 +263,22 @@ impl SELMR {
     pub fn add<'a>(
         &mut self,
         text: &str,
-        params: &Params,
+        params: Option<&Params>,
     ) {
-        self.params = params.clone();
+        if params.is_some() {
+            self.params = params.unwrap().clone();
+        }
         let binding = text.to_string();
         let text = &tokenizer::tokenize(&binding);
         info!(target: "selmr", "adding {} tokens", text.len());
         let mut phrases = HashMap::<&'a [&'a str], Counter<(&'a [&'a str], &'a [&'a str])>>::new();
-        for l_len in params.min_left_context_len..params.max_left_context_len + 1 {
-            for r_len in params.min_right_context_len..params.max_right_context_len + 1 {
+        for l_len in self.params.min_left_context_len..self.params.max_left_context_len + 1 {
+            for r_len in self.params.min_right_context_len..self.params.max_right_context_len + 1 {
                 let mut new_phrases =
                     HashMap::<&'a [&'a str], Counter<(&'a [&'a str], &'a [&'a str])>>::new();
                 let mut new_contexts =
                     HashMap::<(&'a [&'a str], &'a [&'a str]), Counter<&'a [&'a str]>>::new();
-                for p_len in params.min_phrase_len..params.max_phrase_len + 1 {
+                for p_len in self.params.min_phrase_len..self.params.max_phrase_len + 1 {
                     for (l, p, r) in (ContextPhraseWindowGenerator {
                         text,
                         l_len,
@@ -309,13 +299,13 @@ impl SELMR {
                             .or_insert(1);
                     }
                 }
-                new_phrases.retain(|_, cs| cs.len() >= params.min_phrase_keys);
-                new_contexts.retain(|_, ps| ps.len() >= params.min_context_keys);
+                new_phrases.retain(|_, cs| cs.len() >= self.params.min_phrase_keys);
+                new_contexts.retain(|_, ps| ps.len() >= self.params.min_context_keys);
                 let new_contexts: HashSet<_> = new_contexts.keys().cloned().collect();
                 for (p, ps) in new_phrases.iter() {
                     for ((l, r), count) in ps.iter() {
                         if new_contexts.contains(&(*l, *r)) {
-                            if l.len() > params.min_left_context_len {
+                            if l.len() > self.params.min_left_context_len {
                                 if let Some(cs) = phrases.get(p) {
                                     if let Some(context_count) = cs.get(&(&l[1..], r)) {
                                         if *context_count != *count {
@@ -324,7 +314,7 @@ impl SELMR {
                                     }
                                 }
                             }
-                            if r.len() > params.min_right_context_len {
+                            if r.len() > self.params.min_right_context_len {
                                 if let Some(cs) = phrases.get(p) {
                                     if let Some(context_count) = cs.get(&(l, &r[..r.len() - 1])) {
                                         if *context_count != *count {
@@ -333,8 +323,8 @@ impl SELMR {
                                     }
                                 }
                             }
-                            if l.len() > params.min_left_context_len
-                                && r.len() > params.min_right_context_len
+                            if l.len() > self.params.min_left_context_len
+                                && r.len() > self.params.min_right_context_len
                             {
                                 if let Some(cs) = phrases.get(p) {
                                     if let Some(context_count) =
@@ -346,8 +336,8 @@ impl SELMR {
                                     }
                                 }
                             }
-                            if l.len() == params.min_left_context_len
-                                && r.len() == params.min_right_context_len
+                            if l.len() == self.params.min_left_context_len
+                                && r.len() == self.params.min_right_context_len
                             {
                                 phrases.entry(p).or_default()[&(*l, *r)] = *count;
                             }
@@ -368,31 +358,31 @@ impl SELMR {
             }
         }
         // create the phrases with ordered ContextCounters
-        self.phrases = TextMap::new();
+        let mut other = SELMR::new();
         for (phrase, phrase_contexts) in unordered_phrases.iter() {
             let ordered_phrase_contexts: IndexMap<Text, usize> =
                 phrase_contexts.most_common_ordered().into_iter().collect();
-            self.phrases.map.insert(
+            other.phrases.map.insert(
                 phrase.clone(),
                 TextCounter {
                     map: ordered_phrase_contexts,
                 },
             );
         }
-        self.contexts = self.phrases.swap()
+        self.merge(&other);
     }
-
     /// Returns the most similar phrases based on common contexts
     ///
     /// # Example 1
     ///
     /// ```
-    /// use selmr::selmr::SELMR;
-    /// use selmr::text_structs_2::Text;
+    /// use selmr::selmr::{SELMR, Params};
+    /// use selmr::text_structs::Text;
     ///
+    /// let params = Params::test();
     /// let mut s = SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
-    /// let actual = s.most_similar_phrase(Text::word("2"), None, Some(25), Some(25), Some(15), "count").unwrap();
+    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let actual = s.most_similar(Text::word("2"), None, Some(25), Some(15), "count").unwrap();
     /// let expect = [(Text::word("2"), 5.0), (Text::word("1"), 1.0)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
@@ -400,12 +390,13 @@ impl SELMR {
     /// # Example 2
     ///
     /// ```
-    /// use selmr::selmr::SELMR;
-    /// use selmr::text_structs_2::Text;
+    /// use selmr::selmr::{SELMR, Params};
+    /// use selmr::text_structs::Text;
     ///
-    /// let mut s = selmr::selmr::SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
-    /// let actual = s.most_similar_phrase(Text::word("2"), None, Some(25), Some(25), Some(15), "jaccard").unwrap();
+    /// let params = Params::test();
+    /// let mut s = SELMR::new();
+    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let actual = s.most_similar(Text::word("2"), None, Some(25), Some(15), "jaccard").unwrap();
     /// let expect = [(Text::word("2"), 1.0), (Text::word("1"), 0.2)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
@@ -413,16 +404,17 @@ impl SELMR {
     /// # Example 3
     ///
     /// ```
-    /// use selmr::selmr::SELMR;
-    /// use selmr::text_structs_2::Text;
+    /// use selmr::selmr::{SELMR, Params};
+    /// use selmr::text_structs::Text;
     ///
-    /// let mut s = selmr::selmr::SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
-    /// let actual = s.most_similar_phrase(Text::word("2"), None, Some(25), Some(25), Some(15), "weighted_jaccard").unwrap();
+    /// let params = Params::test();
+    /// let mut s = SELMR::new();
+    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let actual = s.most_similar(Text::word("2"), None, Some(25), Some(15), "weighted_jaccard").unwrap();
     /// let expect = [(Text::word("2"), 1.0), (Text::word("1"), 0.16666667)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
-    pub fn most_similar_phrase(
+    pub fn most_similar(
         &self,
         text: Text,
         constraint: Option<Text>,
@@ -439,32 +431,9 @@ impl SELMR {
                 measure,
             )
         } else {
-            Err(format!("Phrase not found: {}", text))
+            Err(format!("Text not found: {}", text))
         }
     }
-
-    /// context equivalent of most_similar_phrase
-    pub fn most_similar_context(
-        &self,
-        text: Text,
-        constraint: Option<Text>,
-        multiset_topn: Option<usize>,
-        topn: Option<usize>,
-        measure: &str,
-    ) -> Result<Vec<(Text, f32)>, String> {
-        if let Some(multiset) = self.get_multiset(&text, multiset_topn) {
-            self.most_similar_from_multiset(
-                &multiset,
-                constraint,
-                multiset_topn,
-                topn,
-                measure,
-            )
-        } else {
-            Err(format!("Context not found: {}", text))
-        }
-    }
-
     /// Find the most similar phrases from a given multiset
     pub fn most_similar_from_multiset(
         &self,
@@ -485,51 +454,6 @@ impl SELMR {
             Err(e) => Err(e),
         }
     }
-
-
-    // /// Find the most similar phrases from a given multiset
-    // pub fn most_similar_from_context_multiset(
-    //     &self,
-    //     multiset: &IndexMap<&Text, usize>,
-    //     context: Option<Text>,
-    //     topcontexts: Option<usize>,
-    //     topphrases: Option<usize>,
-    //     topn: Option<usize>,
-    //     measure: &str,
-    // ) -> Result<Vec<(Text, f32)>, String> {
-    //     match self.get_phrases_to_evaluate(multiset, context, topphrases) {
-    //         Ok(phrases_to_evaluate) => self.most_similar_from_phrases(
-    //             multiset,
-    //             &phrases_to_evaluate,
-    //             topcontexts,
-    //             topn,
-    //             measure,
-    //         ),
-    //         Err(e) => Err(e),
-    //     }
-    // }
-
-    // /// Context equivalent of most_similar_from_context_multiset
-    // pub fn most_similar_from_phrase_multiset(
-    //     &self,
-    //     multiset: &IndexMap<&Text, usize>,
-    //     phrase: Option<Text>,
-    //     topphrases: Option<usize>,
-    //     topcontexts: Option<usize>,
-    //     topn:Option<usize>,
-    //     measure: &str,
-    // ) -> Result<Vec<(Text, f32)>, String> {
-    //     match self.get_contexts_to_evaluate(multiset, phrase, topcontexts) {
-    //         Ok(contexts_to_evaluate) => self.most_similar_from_contexts(
-    //             multiset,
-    //             &contexts_to_evaluate,
-    //             topphrases,
-    //             topn,
-    //             measure,
-    //         ),
-    //         Err(e) => Err(e),
-    //     }
-    // }
     /// Find all phrases that fit a multiset of contexts
     pub fn get_to_evaluate(
         &self,
@@ -554,68 +478,6 @@ impl SELMR {
         }
         Ok(to_evaluate)
     }
-    // /// Find all phrases that fit a multiset of contexts
-    // pub fn get_phrases_to_evaluate(
-    //     &self,
-    //     input_phrase_multiset: &IndexMap<&Text, usize>,
-    //     context: Option<Text>,
-    //     topphrases: Option<usize>,
-    // ) -> Result<HashSet<&Text>, String> {
-    //     // the most_similar function returns the phrases with the most contexts in common with the input phrase
-    //     // first: contexts of the input phrase
-    //     let mut phrases_to_evaluate: HashSet<&Text> = HashSet::new();
-    //     match context {
-    //         Some(context) => {
-    //             // if there is an input context then
-    //             // retrieve phrases that fit that context
-    //             if let Some(items) = self.get_context_phrases(&context, topphrases) {
-    //                 phrases_to_evaluate.extend(items.keys());
-    //             }
-    //         }
-    //         None => {
-    //             // if there is no input context then
-    //             // for each context in the most common contexts cs update
-    //             for c in input_phrase_multiset.keys() {
-    //                 if let Some(items) = self.get_context_phrases(c, topphrases) {
-    //                     phrases_to_evaluate.extend(items.keys());
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     Ok(phrases_to_evaluate)
-    // }
-
-    // /// Context equivalent of get_phrases_to_evaluate
-    // pub fn get_contexts_to_evaluate(
-    //     &self,
-    //     input_context_multiset: &IndexMap<&Text, usize>,
-    //     phrase: Option<Text>,
-    //     topcontexts: Option<usize>,
-    // ) -> Result<HashSet<&Text>, String> {
-    //     // the most_similar function returns the contexts with the most contexts in common with the input context
-    //     // first: phrases of the input context
-    //     let mut contexts_to_evaluate: HashSet<&Text> = HashSet::new();
-    //     match phrase {
-    //         Some(phrase) => {
-    //             // if there is an input phrase then
-    //             // retrieve contexts that fit that context
-    //             if let Some(items) = self.get_phrase_contexts(&phrase, topcontexts) {
-    //                 contexts_to_evaluate.extend(items.keys());
-    //             }
-    //         }
-    //         None => {
-    //             // if there is no input phrase then
-    //             // for each context in the most common phrases cs update
-    //             for p in input_context_multiset.keys() {
-    //                 if let Some(items) = self.get_phrase_contexts(p, topcontexts) {
-    //                     contexts_to_evaluate.extend(items.keys());
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     Ok(contexts_to_evaluate)
-    // }
-
     /// Find most similar phrases from a list of phrases to evaluate
     pub fn most_similar_from_text(
         &self,
@@ -669,127 +531,18 @@ impl SELMR {
             }
         }
     }
-
-
-    // /// Find most similar phrases from a list of phrases to evaluate
-    // pub fn most_similar_from_phrases(
-    //     &self,
-    //     input_phrase_multiset: &IndexMap<&Text, usize>,
-    //     phrases_to_evaluate: &HashSet<&Text>,
-    //     topcontexts: Option<usize>,
-    //     topn: Option<usize>,
-    //     measure: &str,
-    // ) -> Result<Vec<(Text, f32)>, String> {
-    //     let mut result = Vec::<(Text, f32)>::new();
-    //     match measure {
-    //         "count" | "jaccard" => {
-    //             let set_b: HashSet<&Text> = input_phrase_multiset.keys().cloned().collect();
-    //             for phrase in phrases_to_evaluate {
-    //                 let set_a = &self
-    //                     .get_phrase_contexts(phrase, topcontexts)
-    //                     .unwrap()
-    //                     .keys()
-    //                     .cloned()
-    //                     .collect();
-    //                 let value: f32 = match measure {
-    //                     "count" => count_index(set_a, &set_b),
-    //                     "jaccard" => jaccard_index(set_a, &set_b),
-    //                     _ => 0.0,
-    //                 };
-    //                 result.push(((*phrase).clone(), value));
-    //             }
-    //         }
-    //         "weighted_jaccard" => {
-    //             // iterate over first n phrases that fit context c
-    //             for phrase in phrases_to_evaluate {
-    //                 if let Some(multiset_a) = &self.get_phrase_contexts(phrase, topcontexts) {
-    //                     let value: f32 = weighted_jaccard_index(multiset_a, input_phrase_multiset);
-    //                     result.push(((*phrase).clone(), value));
-    //                 } else {
-    //                     return Err(format!("Phrase not found: {}", phrase))
-    //                 }
-    //             }
-    //         }
-    //         m => return Err(format!("Measure not implemented: {}", m)),
-    //     }
-    //     // sort result based on measure
-    //     result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    //     // select topn results
-    //     match topn {
-    //         Some(topn) => {
-    //             Ok(result[..min(result.len(), topn)].to_vec())
-    //         },
-    //         None => { 
-    //             Ok(result)
-    //         }
-    //     }
-    // }
-
-    // /// Contexts equivalent of most_similar_from_phrases
-    // pub fn most_similar_from_contexts(
-    //     &self,
-    //     input_context_multiset: &IndexMap<&Text, usize>,
-    //     contexts_to_evaluate: &HashSet<&Text>,
-    //     topphrases: Option<usize>,
-    //     topn: Option<usize>,
-    //     measure: &str,
-    // ) -> Result<Vec<(Text, f32)>, String> {
-    //     let mut result = Vec::<(Text, f32)>::new();
-    //     match measure {
-    //         "count" | "jaccard" => {
-    //             let set_b: HashSet<&Text> = input_context_multiset.keys().cloned().collect();
-    //             for context in contexts_to_evaluate {
-    //                 let set_a = &self
-    //                     .get_context_phrases(context, topphrases)
-    //                     .unwrap()
-    //                     .keys()
-    //                     .cloned()
-    //                     .collect();
-    //                 let value: f32 = match measure {
-    //                     "count" => count_index(set_a, &set_b),
-    //                     "jaccard" => jaccard_index(set_a, &set_b),
-    //                     _ => 0.0,
-    //                 };
-    //                 result.push(((*context).clone(), value));
-    //             }
-    //         }
-    //         "weighted_jaccard" => {
-    //             // iterate over first n contexts that fit phrase p
-    //             for context in contexts_to_evaluate {
-    //                 if let Some(multiset_a) = &self.get_context_phrases(context, topphrases) {
-    //                     let value: f32 = weighted_jaccard_index(multiset_a, input_context_multiset);
-    //                     result.push(((*context).clone(), value));
-    //                 } else {
-    //                     return Err(format!("Context not found: {}", context))
-    //                 }
-    //             }
-    //         }
-    //         m => return Err(format!("Measure not implemented: {}", m)),
-    //     }
-    //     // sort result based on measure
-    //     result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    //     // select topn results
-    //     match topn {
-    //         Some(topn) => {
-    //             Ok(result[..min(result.len(), topn)].to_vec())
-    //         },
-    //         None => { 
-    //             Ok(result)
-    //         }
-    //     }
-    // }
-
-    /// Returns the context multiset of a phrase
+    /// Returns the multiset of a text element
     ///
     /// # Example
     ///
     /// ```
     /// use indexmap::IndexMap;
-    /// use selmr::selmr::SELMR;
-    /// use selmr::text_structs_2::Text;
+    /// use selmr::selmr::{SELMR, Params};
+    /// use selmr::text_structs::Text;
     ///
-    /// let mut s = selmr::selmr::SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", 1, 3, 1, 3, 1, 3, 1, 1, "");
+    /// let params = Params::test();
+    /// let mut s = SELMR::new();
+    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
     /// let actual = s.get_multiset(&Text::word("1"), Some(15)).unwrap();
     /// let context = Text::context("a ... b");
     /// let expect = [(&context, &1)].iter().cloned().map(|(p, n)|(p, *n)).collect::<IndexMap<_, _>>();
@@ -824,51 +577,6 @@ impl SELMR {
                 }
             } else {
                 return Err(format!("Text not found: {}", text));
-            }
-        }
-        Ok(result)
-    }
-    /// Returns the context multiset of a list of phrases
-    pub fn get_phrases_contexts(
-        &self,
-        phrases: &Vec<Text>,
-        n: Option<usize>,
-    ) -> Result<HashMap<Text, usize>, String> {
-        let mut result = HashMap::<Text, usize>::new();
-        for phrase in phrases {
-            if let Some(ps) = self.phrases.get(phrase, n) {
-                for (&p, &count) in &ps {
-                    *result.entry(p.clone()).or_insert(0) += count;
-                }
-            } else {
-                return Err(format!("Phrase not found: {}", phrase));
-            }
-        }
-        Ok(result)
-    }
-    // /// Returns the phrase multiset of a context
-    // #[inline]
-    // pub fn get_context_phrases(
-    //     &self,
-    //     context: &Text,
-    //     n: Option<usize>,
-    // ) -> Option<IndexMap<&Text, usize>> {
-    //     self.contexts.get(context, n)
-    // }
-    /// Returns the phrase multiset of a list of contexts
-    pub fn get_contexts_phrases(
-        &self,
-        contexts: &Vec<Text>,
-        n: Option<usize>,
-    ) -> Result<HashMap<Text, usize>, String> {
-        let mut result = HashMap::<Text, usize>::new();
-        for context in contexts {
-            if let Some(cs) = self.contexts.get(context, n) {
-                for (&c, &count) in &cs {
-                    *result.entry(c.clone()).or_insert(0) += count;
-                }
-            } else {
-                return Err(format!("Context not found: {}", context));
             }
         }
         Ok(result)
