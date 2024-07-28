@@ -1,6 +1,7 @@
 use crate::pyselmr::PySELMR;
 use crate::selmr::SELMR;
 use crate::text_structs::{Text, TextCounter, TextMap};
+use crate::selmr::Measure;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -243,7 +244,7 @@ impl HAC {
 				None, // no specific context
 				None, // all topcontexts
 				None, // all topn
-				"weighted_jaccard"
+				Measure::weighted_jaccard_index
 			) {
 				Ok(r) => r.iter().map(|(p, v)|(p.clone(), OrderedFloat(*v))).collect(),
 				Err(e) => {

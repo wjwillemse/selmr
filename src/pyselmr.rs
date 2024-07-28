@@ -1,10 +1,11 @@
 use crate::selmr::{Params, SELMR};
 use crate::hac::PyHAC;
 use crate::text_structs::{Text, TextMap};
+use crate::tokenizer::tokenize;
+use crate::selmr::Measure;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
-use indexmap::IndexMap;
 
 #[pymodule]
 fn selmr(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
@@ -41,6 +42,8 @@ impl PySELMR {
         PySELMR {
             selmr: SELMR {
                 phrases: TextMap::new(),
+                phrase_roots: HashMap::new(),
+                root_phrases: HashMap::new(),
                 contexts: TextMap::new(),
                 phrases_tree: None,
                 contexts_tree: None,
@@ -60,7 +63,7 @@ impl PySELMR {
     }
     /// Write SELMR data structure to a file
     pub fn write(
-        &self,
+        &mut self,
         file: &str, 
         format: &str
     ) -> Result<(), PyErr> {
@@ -119,7 +122,7 @@ impl PySELMR {
         &self, 
         text: String
     ) -> usize {
-        let t = Text::word(&text);
+        let t = Text::extract(&text);
         self.selmr.phrases.map.get_index_of(&t).unwrap()
     }
     /// Get the phrases key of idx
@@ -135,7 +138,7 @@ impl PySELMR {
         &self, 
         text: String
     ) -> usize {
-        let t = Text::context(&text);
+        let t = Text::extract(&text);
         self.selmr.contexts.map.get_index_of(&t).unwrap()
     }
     /// Get the contexts key of text
@@ -157,7 +160,14 @@ impl PySELMR {
         measure: &str,
     ) -> Result<Vec<(String, f32)>, PyErr> {
         let text = Text::extract(text.as_str());
-        let constraint = constraint.map(|c|Text::context(c.as_str()));
+        let constraint = constraint.map(|c|Text::extract(c.as_str()));
+        let measure = if measure == "jaccard" {
+            Measure::jaccard_index
+        } else if measure == "weighted_jaccard" {
+            Measure::weighted_jaccard_index
+        } else {
+            Measure::count_index
+        };
         match self.selmr.most_similar(
             text, 
             constraint, 
@@ -169,37 +179,37 @@ impl PySELMR {
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
     }
-    /// Find the most similar phrases from a given multiset
-    #[pyo3(signature = (multiset, constraint=None, multiset_topn=25, topn=15, measure="count"))]
-    pub fn most_similar_from_multiset(
-        &self,
-        multiset: HashMap<&str, usize>,
-        constraint: Option<&str>,
-        multiset_topn: usize,
-        topn: usize,
-        measure: &str,
-    ) -> Result<Vec<(String, f32)>, PyErr> {
-        let keys = multiset
-            .keys()
-            .map(|c| Text::context(c))
-            .collect::<Vec<_>>();
-        let values = multiset.values().collect::<Vec<_>>();
-        let mut multiset = IndexMap::<&Text, usize>::new();
-        for idx in 0..keys.len() {
-            multiset.insert(&keys[idx], *values[idx]);
-        }
-        let constraint = constraint.map(|value| Text::extract(value));
-        match self.selmr.most_similar_from_multiset(
-            &multiset,
-            constraint,
-            Some(multiset_topn),
-            Some(topn),
-            measure,
-        ) {
-            Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
-            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-        }
-    }
+    // /// Find the most similar phrases from a given multiset
+    // #[pyo3(signature = (multiset, constraint=None, multiset_topn=25, topn=15, measure="count"))]
+    // pub fn most_similar_from_multiset(
+    //     &self,
+    //     multiset: HashMap<&str, usize>,
+    //     constraint: Option<&str>,
+    //     multiset_topn: usize,
+    //     topn: usize,
+    //     measure: &str,
+    // ) -> Result<Vec<(String, f32)>, PyErr> {
+    //     let keys = multiset
+    //         .keys()
+    //         .map(|c| Text::extract(c))
+    //         .collect::<Vec<_>>();
+    //     let values = multiset.values().collect::<Vec<_>>();
+    //     let mut multiset = IndexMap::<&Text, usize>::new();
+    //     for idx in 0..keys.len() {
+    //         multiset.insert(&keys[idx], *values[idx]);
+    //     }
+    //     let constraint = constraint.map(|value| Text::extract(value));
+    //     match self.selmr.most_similar_from_multiset(
+    //         &multiset,
+    //         constraint,
+    //         Some(multiset_topn),
+    //         Some(topn),
+    //         measure,
+    //     ) {
+    //         Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
+    //         Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
+    //     }
+    // }
     /// Get the topn associations of a text
     #[pyo3(signature = (text="", topn=15))]
     pub fn get_multiset(
@@ -256,11 +266,17 @@ impl PySELMR {
         self.selmr.context_matches(context)
     }
     /// Lemmatize phrase based on SELMR data
-    pub fn lemmatize(
+    pub fn tokenize_phrase(
         &self,
         phrase: &str,
-    ) -> Option<Vec<(String, String, String)>> {
-        self.selmr.lemmatize(phrase)
+    ) -> Option<Vec<String>> {
+        Some(
+            self.selmr.phrases
+                .tokenize_phrase(&Text::extract(phrase))
+                .iter()
+                .map(|s|s.to_string())
+                .collect()
+        )
     }
     /// Generate the cluster trees of the selmr data
     pub fn generate_trees(
@@ -286,5 +302,11 @@ impl PySELMR {
             Ok(r) => Ok(r),
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
+    }
+    /// Tokenizer
+    pub fn tokenize<'a>(
+        &'a self,
+        contents: &'a str) -> Result<Vec<Vec<&str>>, PyErr> {
+        Ok(tokenize(contents))
     }
 }

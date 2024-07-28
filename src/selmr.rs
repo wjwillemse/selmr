@@ -72,11 +72,60 @@ impl Params {
     }
 }
 
+pub enum Measure {
+    count_index,
+    jaccard_index,
+    weighted_jaccard_index,
+}
+
+#[inline]
+fn count_index<T: std::cmp::Eq + std::hash::Hash>(
+    a: &HashSet<T>, 
+    b: &HashSet<T>
+) -> f32 {
+    a.intersection(b).collect::<Vec<_>>().len() as f32
+}
+
+#[inline]
+fn jaccard_index<T: std::cmp::Eq + std::hash::Hash>(
+    a: &HashSet<T>, 
+    b: &HashSet<T>
+) -> f32 {
+    a.intersection(b).collect::<Vec<_>>().len() as f32 / max(a.len(), b.len()) as f32
+}
+
+#[inline]
+fn weighted_jaccard_index<T: std::cmp::Eq + std::hash::Hash>(
+    a: &IndexMap<T, usize>,
+    b: &IndexMap<T, usize>,
+) -> f32 {
+    let mut num: f32 = 0.0;
+    let mut denom: f32 = 0.0;
+    for context in a
+        .keys()
+        .collect::<HashSet<_>>()
+        .union(&b.keys().collect())
+    {
+        num += *min(a.get(*context).unwrap_or(&0), b.get(*context).unwrap_or(&0)) as f32;
+        denom += *max(a.get(*context).unwrap_or(&0), b.get(*context).unwrap_or(&0)) as f32;
+    }
+    if denom != 0.0 {
+        num / denom
+    } else {
+        0.0
+    }
+}
+
 /// The SELMR data structure
 #[derive(Deserialize, Clone)]
 pub struct SELMR {
     /// the phrases to contexts map
     pub phrases: TextMap,
+    #[serde(skip)]
+    pub phrase_roots: HashMap<Text, Text>,
+    /// the root phrases to contexts map
+    #[serde(skip)]
+    pub root_phrases: HashMap<Vec<String>, Text>,
     /// the contexts to phrases map
     #[serde(skip)]
     pub contexts: TextMap,
@@ -96,44 +145,6 @@ impl Default for SELMR {
     }
 }
 
-#[inline]
-fn count_index<T: std::cmp::Eq + std::hash::Hash>(
-    a: &HashSet<&T>, 
-    b: &HashSet<&T>
-) -> f32 {
-    a.intersection(b).collect::<Vec<_>>().len() as f32
-}
-
-#[inline]
-fn jaccard_index<T: std::cmp::Eq + std::hash::Hash>(
-    a: &HashSet<&T>, 
-    b: &HashSet<&T>
-) -> f32 {
-    a.intersection(b).collect::<Vec<_>>().len() as f32 / max(a.len(), b.len()) as f32
-}
-
-#[inline]
-fn weighted_jaccard_index<T: std::cmp::Eq + std::hash::Hash>(
-    a: &IndexMap<&T, usize>,
-    b: &IndexMap<&T, usize>,
-) -> f32 {
-    let mut num: f32 = 0.0;
-    let mut denom: f32 = 0.0;
-    for context in a
-        .keys()
-        .collect::<HashSet<_>>()
-        .union(&b.keys().collect())
-    {
-        num += *min(a.get(*context).unwrap_or(&0), b.get(*context).unwrap_or(&0)) as f32;
-        denom += *max(a.get(*context).unwrap_or(&0), b.get(*context).unwrap_or(&0)) as f32;
-    }
-    if denom != 0.0 {
-        num / denom
-    } else {
-        0.0
-    }
-}
-
 // Core SELMR methods
 impl SELMR {
     /// Initializes an empty SELMR data structure
@@ -145,9 +156,9 @@ impl SELMR {
     /// ```
     pub fn new() -> Self {
         SELMR {
-            // phrases: PhraseMap::new(),
             phrases: TextMap::new(),
-            // contexts: ContextMap::new(),
+            phrase_roots: HashMap::new(),
+            root_phrases: HashMap::new(),
             contexts: TextMap::new(),
             phrases_tree: None,
             contexts_tree: None,
@@ -162,10 +173,11 @@ impl SELMR {
     /// let s = selmr::selmr::SELMR::new();
     /// ```
     pub fn write(
-        &self, 
+        &mut self, 
         file: &str, 
         format: &str
     ) -> Result<(), std::io::Error> {
+        self.phrases = self.phrases.combine_phrases();
         let mut f = fs::File::create(file)?;
         if format == "json" {
             let s = serde_json::to_string_pretty(&self).unwrap();
@@ -176,7 +188,22 @@ impl SELMR {
             match zip.start_file("data.json", FileOptions::default()) {
                 Ok(()) => match zip.write_all(s.as_bytes()) {
                     Ok(()) => match zip.finish() {
-                        Ok(_) => return Ok(()),
+                        Ok(_) => {
+                            self.phrase_roots = HashMap::new();
+                            for phrase in self.phrases.map.keys() {
+                                match phrase {
+                                    Text::Word(w) => {
+                                        self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
+                                        if let Some(tokens) = &w.tokens {
+                                            self.root_phrases.insert(tokens.clone(), Text::word(&w.value, None));
+                                        }
+                                    },
+                                    Text::Context(_) => todo!()
+                                }
+                            }
+                            self.phrases = self.phrases.derive_root_phrases();
+                            return Ok(())
+                        },
                         Err(e) => return Err(e.into()),
                     },
                     Err(e) => return Err(e),
@@ -248,6 +275,20 @@ impl SELMR {
     ) {
         // merge the content of s with that of the current struct
         self.phrases.merge(&other.phrases);
+        // rebuild the phrase_roots
+        self.phrase_roots = HashMap::new();
+        for phrase in self.phrases.map.keys() {
+            match phrase {
+                Text::Word(w) => {
+                    self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
+                    if let Some(tokens) = &w.tokens {
+                        self.root_phrases.insert(tokens.clone(), Text::word(&w.value, None));
+                    }
+                },
+                Text::Context(_) => todo!()
+            }
+        }
+        self.phrases = self.phrases.derive_root_phrases();
         self.contexts = self.phrases.swap();
         // to do: perform actual merge instead of replace
         self.phrases_tree = other.phrases_tree.clone();
@@ -269,7 +310,7 @@ impl SELMR {
             self.params = params.unwrap().clone();
         }
         let binding = text.to_string();
-        let text = &tokenizer::tokenize(&binding);
+        let sentences = self.text_tokens(&binding);
         info!(target: "selmr", "adding {} tokens", text.len());
         let mut phrases = HashMap::<&'a [&'a str], Counter<(&'a [&'a str], &'a [&'a str])>>::new();
         for l_len in self.params.min_left_context_len..self.params.max_left_context_len + 1 {
@@ -279,24 +320,26 @@ impl SELMR {
                 let mut new_contexts =
                     HashMap::<(&'a [&'a str], &'a [&'a str]), Counter<&'a [&'a str]>>::new();
                 for p_len in self.params.min_phrase_len..self.params.max_phrase_len + 1 {
-                    for (l, p, r) in (ContextPhraseWindowGenerator {
-                        text,
-                        l_len,
-                        p_len,
-                        r_len,
-                    }) {
-                        new_phrases
-                            .entry(p)
-                            .or_default()
-                            .entry((l, r))
-                            .and_modify(|count| *count += 1)
-                            .or_insert(1);
-                        new_contexts
-                            .entry((l, r))
-                            .or_default()
-                            .entry(p)
-                            .and_modify(|count| *count += 1)
-                            .or_insert(1);
+                    for text in sentences.iter() {
+                        for (l, p, r) in (ContextPhraseWindowGenerator {
+                            text,
+                            l_len,
+                            p_len,
+                            r_len,
+                        }) {
+                            new_phrases
+                                .entry(p)
+                                .or_default()
+                                .entry((l, r))
+                                .and_modify(|count| *count += 1)
+                                .or_insert(1);
+                            new_contexts
+                                .entry((l, r))
+                                .or_default()
+                                .entry(p)
+                                .and_modify(|count| *count += 1)
+                                .or_insert(1);
+                        }
                     }
                 }
                 new_phrases.retain(|_, cs| cs.len() >= self.params.min_phrase_keys);
@@ -346,30 +389,101 @@ impl SELMR {
                 }
             }
         }
-        // construct the (unordered) phrases and contexts
-        let mut unordered_phrases = HashMap::<Text, Counter<Text>>::new();
-        // let mut unordered_contexts = HashMap::<Text, Counter<Text>>::new();
-        for (phrase, phrase_contexts) in phrases.iter() {
-            let p = Text::word(&phrase.join(" "));
-            for ((left, right), n) in phrase_contexts.iter() {
-                let c = Text::context(&(format!("{} ... {}", left.join(" "), right.join(" "))));
-                unordered_phrases.entry(p.clone()).or_default()[&c] = *n;
-                // unordered_contexts.entry(c).or_default()[&p] = *n;
+        // construct the phrases textmap
+        let mut untokenized = SELMR::new();
+        for (phrase, multiset) in phrases.iter() {
+            let phrase = Text::word(&phrase.join(" "), None);
+            let mut new_multiset = IndexMap::<Text, usize>::new();
+            for ((left, right), n) in multiset.iter() {
+                let c = Text::context(&left.join(" "), &right.join(" "));
+                *new_multiset.entry(c.clone()).or_default() = *n;
             }
-        }
-        // create the phrases with ordered ContextCounters
-        let mut other = SELMR::new();
-        for (phrase, phrase_contexts) in unordered_phrases.iter() {
-            let ordered_phrase_contexts: IndexMap<Text, usize> =
-                phrase_contexts.most_common_ordered().into_iter().collect();
-            other.phrases.map.insert(
-                phrase.clone(),
+            untokenized.phrases.map.insert(
+                phrase.clone(), 
                 TextCounter {
-                    map: ordered_phrase_contexts,
-                },
+                    map: new_multiset,
+                }
             );
         }
-        self.merge(&other);
+        let mut tokenized = SELMR::new();
+        for (phrase, multiset) in untokenized.phrases.map.iter() {
+            let mut new_multiset = IndexMap::<Text, usize>::new();
+            for (c, n) in multiset.map.iter() {
+                *new_multiset.entry(c.clone()).or_default() = *n;
+            }
+            let new_phrase = &untokenized.phrases.tokenize_phrase(&phrase)[0];
+            tokenized.phrases.map.insert(
+                new_phrase.clone(), 
+                TextCounter {
+                    map: new_multiset,
+                }
+            );
+        }
+        self.merge(&tokenized);
+    }
+    ///
+    pub fn get_multiset(
+        &self,
+        text: &Text,
+        n: Option<usize>,
+    ) -> Option<IndexMap<Text, usize>> {
+        match text {
+            Text::Word(_) => {
+                if let Some(r) = &self.phrase_roots.get(text) {
+                    match r {
+                        Text::Word(w) => {
+                            if let Some(tokens) = &w.tokens {
+                                let root = &Text::word(&tokens[0], None);
+                                let suffix = &tokens[1];
+                                self.phrases.get_filtered_multiset(root, suffix, n)
+                            } else {
+                                self.phrases.get_multiset(text, n)
+                            }
+                        },
+                        Text::Context(_) => todo!()
+                    }
+                } else {
+                    self.phrases.get_multiset(text, n)
+                }
+            },
+            Text::Context(_) => {
+                if text.to_string().contains('-') {
+                    let suffix = text.clone().remove_to_right();
+                    let multiset = self.contexts.get_multiset(text, n);
+                    let mut new_multiset = IndexMap::<Text, usize>::new();
+                    for (root, n) in multiset.clone().unwrap() {
+                        let w = root.to_string();
+                        let tokens = Vec::from(
+                            [w.clone(), suffix.clone()]
+                        );
+                        if let Some(r) = &self.root_phrases.get(&tokens) {
+                            new_multiset.insert(r.clone().clone(), n);
+                        }
+                    }
+                    Some(new_multiset)
+                } else {
+                    self.contexts.get_multiset(text, n)
+                }
+            },
+        }
+    }
+    /// Returns the multiset of a list of text elements
+    pub fn get_list_multiset(
+        &self,
+        texts: &Vec<Text>,
+        n: Option<usize>,
+    ) -> Result<HashMap<Text, usize>, String> {
+        let mut result = HashMap::<Text, usize>::new();
+        for text in texts {
+            if let Some(es) = self.get_multiset(text, n) {
+                for (e, n) in es {
+                    *result.entry(e.clone()).or_insert(0) += n;
+                }
+            } else {
+                return Err(format!("Text not found: {}", text));
+            }
+        }
+        Ok(result)
     }
     /// Returns the most similar phrases based on common contexts
     ///
@@ -420,7 +534,7 @@ impl SELMR {
         constraint: Option<Text>,
         multiset_topn: Option<usize>,
         topn: Option<usize>,
-        measure: &str,
+        measure: Measure,
     ) -> Result<Vec<(Text, f32)>, String> {
         if let Some(multiset) = self.get_multiset(&text, multiset_topn) {
             self.most_similar_from_multiset(
@@ -437,41 +551,42 @@ impl SELMR {
     /// Find the most similar phrases from a given multiset
     pub fn most_similar_from_multiset(
         &self,
-        multiset: &IndexMap<&Text, usize>,
+        multiset: &IndexMap<Text, usize>,
         constraint: Option<Text>,
         multiset_topn: Option<usize>,
         topn: Option<usize>,
-        measure: &str,
+        measure: Measure,
     ) -> Result<Vec<(Text, f32)>, String> {
         match self.get_to_evaluate(multiset, constraint, multiset_topn) {
-            Ok(to_evaluate) => self.most_similar_from_text(
+            Ok(to_evaluate) => {
+                self.most_similar_from_text(
                 multiset,
                 &to_evaluate,
                 multiset_topn,
                 topn,
                 measure,
-            ),
+            )},
             Err(e) => Err(e),
         }
     }
     /// Find all phrases that fit a multiset of contexts
     pub fn get_to_evaluate(
         &self,
-        multiset: &IndexMap<&Text, usize>,
+        multiset: &IndexMap<Text, usize>,
         constraint: Option<Text>,
         multiset_topn: Option<usize>,
-    ) -> Result<HashSet<&Text>, String> {
-        let mut to_evaluate: HashSet<&Text> = HashSet::new();
+    ) -> Result<HashSet<Text>, String> {
+        let mut to_evaluate: HashSet<Text> = HashSet::new();
         match constraint {
             Some(constraint) => {
                 if let Some(items) = self.get_multiset(&constraint, multiset_topn) {
-                    to_evaluate.extend(items.keys());
+                    to_evaluate.extend(items.into_keys());
                 }
             }
             None => {
                 for item in multiset.keys() {
                     if let Some(items) = self.get_multiset(item, multiset_topn) {
-                        to_evaluate.extend(items.keys());
+                        to_evaluate.extend(items.into_keys());
                     }
                 }
             }
@@ -481,32 +596,30 @@ impl SELMR {
     /// Find most similar phrases from a list of phrases to evaluate
     pub fn most_similar_from_text(
         &self,
-        multiset: &IndexMap<&Text, usize>,
-        to_evaluate: &HashSet<&Text>,
+        multiset: &IndexMap<Text, usize>,
+        to_evaluate: &HashSet<Text>,
         multiset_topn: Option<usize>,
         topn: Option<usize>,
-        measure: &str,
+        measure: Measure,
     ) -> Result<Vec<(Text, f32)>, String> {
         let mut result = Vec::<(Text, f32)>::new();
         match measure {
-            "count" | "jaccard" => {
-                let set_b: HashSet<&Text> = multiset.keys().cloned().collect();
+            Measure::count_index | Measure::jaccard_index => {
+                let set_b: HashSet<Text> = multiset.clone().into_keys().collect();
                 for text in to_evaluate {
                     let set_a = &self
-                        .get_multiset(text, multiset_topn)
-                        .unwrap()
-                        .keys()
-                        .cloned()
+                        .get_multiset(text, multiset_topn).unwrap()
+                        .into_keys()
                         .collect();
                     let value: f32 = match measure {
-                        "count" => count_index(set_a, &set_b),
-                        "jaccard" => jaccard_index(set_a, &set_b),
+                        Measure::count_index => count_index(set_a, &set_b),
+                        Measure::jaccard_index => jaccard_index(set_a, &set_b),
                         _ => 0.0,
                     };
                     result.push(((*text).clone(), value));
                 }
             }
-            "weighted_jaccard" => {
+            Measure::weighted_jaccard_index => {
                 // iterate over first n phrases that fit context c
                 for text in to_evaluate {
                     if let Some(multiset_a) = &self.get_multiset(text, multiset_topn) {
@@ -517,7 +630,6 @@ impl SELMR {
                     }
                 }
             }
-            m => return Err(format!("Measure not implemented: {}", m)),
         }
         // sort result based on measure
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
@@ -531,56 +643,8 @@ impl SELMR {
             }
         }
     }
-    /// Returns the multiset of a text element
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use indexmap::IndexMap;
-    /// use selmr::selmr::{SELMR, Params};
-    /// use selmr::text_structs::Text;
-    ///
-    /// let params = Params::test();
-    /// let mut s = SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
-    /// let actual = s.get_multiset(&Text::word("1"), Some(15)).unwrap();
-    /// let context = Text::context("a ... b");
-    /// let expect = [(&context, &1)].iter().cloned().map(|(p, n)|(p, *n)).collect::<IndexMap<_, _>>();
-    /// assert_eq!(actual, expect);
-    /// ```
-    ///
-    #[inline]
-    /// Retrieve the multiset of a given text element
-    pub fn get_multiset(
-        &self,
-        text: &Text,
-        n: Option<usize>,
-    ) -> Option<IndexMap<&Text, usize>> {
-        match text {
-            Text::Word(_) => self.phrases.get(text, n),
-            Text::Context(_) => self.contexts.get(text, n)
-        }
-    }
-    /// Returns the multiset of a list of text elements
-    pub fn get_list_multiset(
-        &self,
-        texts: &Vec<Text>,
-        n: Option<usize>,
-    ) -> Result<HashMap<Text, usize>, String> {
-        let mut result = HashMap::<Text, usize>::new();
-        for text in texts {
-            if let Some(es) = match text {
-                Text::Word(_) => self.phrases.get(text, n),
-                Text::Context(_) => self.contexts.get(text, n) } {
-                for (&e, &n) in &es {
-                    *result.entry(e.clone()).or_insert(0) += n;
-                }
-            } else {
-                return Err(format!("Text not found: {}", text));
-            }
-        }
-        Ok(result)
-    }
+
+
     /// Prunes a SELMR data structure
     pub fn prune(
         &mut self, 
@@ -610,6 +674,7 @@ impl SELMR {
         self.phrases.map.retain(|_, v|!v.map.is_empty());
         // self.contexts.map.retain(|_, v|v.map.len() > 0);
         // reorder contexts so that when an object is read it has the same order
+        self.phrases.sort();
         self.contexts = self.phrases.swap()
     }
 
@@ -624,7 +689,7 @@ impl SELMR {
         let mut results = HashMap::<(String, String), usize>::new();
         for p in self.phrases.map.keys() {
             for _result_p in re_p.find_iter(&p.to_string()) {
-                if let Some(result_phrases) = self.phrases.map.get(&Text::context(_result_p.as_str())) {
+                if let Some(result_phrases) = self.phrases.map.get(&Text::extract(_result_p.as_str())) {
                     for (c, count) in &result_phrases.map {
                         for _result_c in re_c.find_iter(&c.to_string()) {
                             results.insert(
@@ -678,166 +743,12 @@ impl SELMR {
         }
         Some(results)
     }
-    /// Lemmatize phrase based on SELMR data
-    pub fn lemmatize(
-        &self,
-        phrase: &str
-    ) -> Option<Vec<(String, String, String)>> {
-
-        let mut results = Vec::<(String, String, String)>::new();
-
-        let simple_rules = Vec::from([
-            // personal pronouns
-            ("me", "I", "personal pronoun", "me -> I"),
-            ("him", "he", "personal pronoun", "him -> he"),
-            ("her", "she", "personal pronoun", "her -> she"),
-            ("us", "we", "personal pronoun", "us -> we"),
-            ("them", "they", "personal pronoun", "them -> they"),
-            // possessive pronouns
-            ("my", "I", "possessive pronouns", "my -> I"),
-            ("your", "you", "possessive pronouns", "your -> you"),
-            ("his", "he", "possessive pronouns", "his -> he"),
-            ("her", "she", "possessive pronouns", "her -> she"),
-            ("its", "it", "possessive pronouns", "its -> it"),
-            ("their", "they", "possessive pronouns", "their -> they"),
-            ("our", "we", "possessive pronouns", "our -> we"),
-            // irregular verbs
-            ("is", "be", "verb", "irregular verb"),
-            ("are", "be", "verb", "irregular verb"),
-            ("was", "be", "verb", "irregular verb"),
-            ("were", "be", "verb", "irregular verb"),
-            ("been", "be", "verb", "irregular verb"),
-            ("has", "have", "verb", "irregular verb"),
-            ("have", "have", "verb", "irregular verb"),
-            ("had", "have", "verb", "irregular verb"),
-            ("began", "begin", "verb", "irregular verb"),
-            ("begun", "begin", "verb", "irregular verb"),
-            ("broke", "break", "verb", "irregular verb"),
-            ("broken", "break", "verb", "irregular verb"),
-            ("brought", "bring", "verb", "irregular verb"),
-            ("bought", "buy", "verb", "irregular verb"),
-            ("built", "build", "verb", "irregular verb"),
-            ("chose", "choose", "verb", "irregular verb"),
-            ("chosen", "choose", "verb", "irregular verb"),
-            ("came", "come", "verb", "irregular verb"),
-            ("did", "do", "verb", "irregular verb"),
-            ("done", "do", "verb", "irregular verb"),
-            ("drew", "draw", "verb", "irregular verb"),
-            ("drawn", "draw", "verb", "irregular verb"),
-            ("drove", "drive", "verb", "irregular verb"),
-            ("driven", "drive", "verb", "irregular verb"),
-            ("ate", "eat", "verb", "irregular verb"),
-            ("eaten", "eat", "verb", "irregular verb"),
-            ("felt", "feel", "verb", "irregular verb"),
-            ("found", "find", "verb", "irregular verb"),
-            ("fought", "fight", "verb", "irregular verb"),
-            ("get", "got", "verb", "irregular verb"),
-            ("gave", "give", "verb", "irregular verb"),
-            ("given", "give", "verb", "irregular verb"),
-            ("gone", "go", "verb", "irregular verb"),
-            ("went", "go", "verb", "irregular verb"),
-            ("heard", "hear", "verb", "irregular verb"),
-            ("held", "hold", "verb", "irregular verb"),
-            ("kept", "keep", "verb", "irregular verb"),
-            ("knew", "know", "verb", "irregular verb"),
-            ("known", "know", "verb", "irregular verb"),
-            ("left", "leave", "verb", "irregular verb"),
-            ("led", "lead", "verb", "irregular verb"),
-            ("lay", "lie", "verb", "irregular verb"),
-            ("lain", "lie", "verb", "irregular verb"),
-            ("lost", "lose", "verb", "irregular verb"),
-            ("made", "make", "verb", "irregular verb"),
-            ("meant", "mean", "verb", "irregular verb"),
-            ("met", "meet", "verb", "irregular verb"),
-            ("paid", "pay", "verb", "irregular verb"),
-            ("ran", "run", "verb", "irregular verb"),
-            ("said", "say", "verb", "irregular verb"),
-            ("saw", "see", "verb", "irregular verb"),
-            ("seen", "see", "verb", "irregular verb"),
-            ("sold", "sell", "verb", "irregular verb"),
-            ("sent", "send", "verb", "irregular verb"),
-            ("sat", "sit", "verb", "irregular verb"),
-            ("spoke", "speak", "verb", "irregular verb"),
-            ("spoken", "speak", "verb", "irregular verb"),
-            ("spent", "spend", "verb", "irregular verb"),
-            ("stood", "stand", "verb", "irregular verb"),
-            ("took", "take", "verb", "irregular verb"),
-            ("taken", "take", "verb", "irregular verb"),
-            ("taught", "teach", "verb", "irregular verb"),
-            ("told", "tell", "verb", "irregular verb"),
-            ("thought", "think", "verb", "irregular verb"),
-            ("understood", "understand", "verb", "irregular verb"),
-            ("wore", "wear", "verb", "irregular verb"),
-            ("worn", "wear", "verb", "irregular verb"),
-            ("won", "win", "verb", "irregular verb"),
-            ("wrote", "write", "verb", "irregular verb"),
-            ("written", "write", "verb", "irregular verb"),
-        ]);
-        for (p, singular, rule, verbose) in &simple_rules {
-            if phrase == *p {
-                results.push((singular.to_string(), rule.to_string(), verbose.to_string()));
-            }
-        }
-        if results.is_empty() {
-            let hm = Vec::from([
-                // proper and common noun rules
-                ("([a-zA-Z][a-z]*[b-df-hj-np-tv-z])ies", "y", "noun", "-consonant and -y -> change -y to -ies"),
-                ("([a-zA-Z][a-z]*[aeuoi])ys", "y", "noun", "-vowel and -y -> add an -s"),
-                ("([a-zA-Z][a-z]*)ves", "f", "noun", "-f -> change to -ve and add an -s"),
-                ("([a-zA-Z][a-z]*)ves", "fe", "noun", "-fe -> change to -ve and add an -s"),
-                ("([a-zA-Z][a-z]*)i", "us", "noun", "-us -> replace with an -i"),
-                ("([a-zA-Z][a-z]*)oes", "o", "noun", "-o -> add an -es"),
-                ("([a-zA-Z][a-z]*)es", "is", "noun", "-is -> replace with an -es"),
-                ("([a-zA-Z][a-z]*)a", "on", "noun", "-on -> replace with an -a"),
-                ("([a-zA-Z][a-z]*)ses", "s", "noun", "‑s -> add an -es"),
-                ("([a-zA-Z][a-z]*)xes", "s", "noun", "-x -> add an -es"),
-                ("([a-zA-Z][a-z]*)zes", "s", "noun", "-z -> add an -es"),
-                ("([a-zA-Z][a-z]*)sses", "ss", "noun", "‑ss -> add an -es"),
-                ("([a-zA-Z][a-z]*)shes", "sh", "noun", "‑sh -> add an -es"),
-                ("([a-zA-Z][a-z]*)ches", "ch", "noun", "‑ch -> add an -es"),
-                ("([a-zA-Z][a-z]*)s", "", "noun", "_ -> add an -s"),
-                // regular verb rules
-                ("([a-z]+[aeuoi])d", "", "verb", "-vowel -> add an -d"),
-                ("([a-z]+[b-df-hj-np-tv-z])ed", "", "verb", "-consonant -> add an -ed"),
-                ("([a-z]+[b-df-hj-np-tv-z])ied", "y", "verb", "-consonent and -y -> add an -ied"),
-                ("([a-z]+[b-df-hj-np-tv-z])[b-df-hj-np-tv-z]ed", "", "verb", "-consonant -> add an -ed"),
-                ("([a-z]+)s", "", "verb", "_ -> add an -s"),
-                ("([a-z]+)ches", "ch", "verb", "ch -> add an -es"),
-                ("([a-z]+)shes", "sh", "verb", "sh -> add an -es"),
-                ("([a-z]+)ses", "s", "verb", "s -> add an -es"),
-                ("([a-z]+)xes", "x", "verb", "x -> add an -es"),
-                ("([a-z]+)zes", "z", "verb", "z -> add an -es"),
-                ("([a-z]+[b-df-hj-np-tv-z])ies", "y", "verb", "-consonant and y -> replace y with ies"),
-                ("([a-z]+)ing", "a", "verb", "-a -> add an -ing"),
-                ("([a-z]+)ing", "e", "verb", "-e -> add an -ing"),
-                ("([a-z]+)ing", "u", "verb", "-u -> add an -ing"),
-                ("([a-z]+)ing", "o", "verb", "-o -> add an -ing"),
-                ("([a-z]+)ing", "i", "verb", "-i -> add an -ing"),
-                ("([a-z]+[b-df-hj-np-tv-z])ing", "", "verb", "-consonant -> add an -ing"),
-                ("([a-z]+[b-df-hj-np-tv-z])[b-df-hj-np-tv-z]ing", "", "verb", "-consonant -> add double consonant and -ing"),
-
-            ]);
-            for (regex, singular, rule, verbose) in &hm {
-                let re_1 = Regex::new(format!("^{}$", regex).as_str()).unwrap();
-                if let Some(caps) = re_1.captures(phrase) {
-                    if let Some(cap) = caps.get(1) {
-                        let singular_text = format!("{}{}", cap.as_str(), singular);
-                        if self.phrases.map.contains_key(&Text::word(&singular_text)) {
-                            results.push((singular_text.to_string(), rule.to_string(), verbose.to_string()));
-                        }
-                    } else {
-                        let singular_text = singular.to_string();
-                        if self.phrases.map.contains_key(&Text::word(&singular_text)) {
-                            results.push((singular_text.to_string(), rule.to_string(), verbose.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-        if results.is_empty() {
-            results.push((phrase.to_string(), "none".to_string(), "none".to_string()));
-        }
-        Some(results)
+    /// tokenize text
+    pub fn text_tokens<'a>(
+        &'a self,
+        text: &'a str) -> Vec<Vec<&str>>{
+        let sentences = tokenizer::tokenize(text);
+        sentences
     }
     /// Perform clustering of the phrases to create tree
     pub fn generate_trees(
