@@ -73,9 +73,9 @@ impl Params {
 }
 
 pub enum Measure {
-    count_index,
-    jaccard_index,
-    weighted_jaccard_index,
+    CountIndex,
+    JaccardIndex,
+    WeightedJaccardIndex,
 }
 
 #[inline]
@@ -193,8 +193,8 @@ impl SELMR {
                             for phrase in self.phrases.map.keys() {
                                 match phrase {
                                     Text::Word(w) => {
-                                        self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
                                         if let Some(tokens) = &w.tokens {
+                                            self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
                                             self.root_phrases.insert(tokens.clone(), Text::word(&w.value, None));
                                         }
                                     },
@@ -280,8 +280,8 @@ impl SELMR {
         for phrase in self.phrases.map.keys() {
             match phrase {
                 Text::Word(w) => {
-                    self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
                     if let Some(tokens) = &w.tokens {
+                        self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
                         self.root_phrases.insert(tokens.clone(), Text::word(&w.value, None));
                     }
                 },
@@ -411,7 +411,7 @@ impl SELMR {
             for (c, n) in multiset.map.iter() {
                 *new_multiset.entry(c.clone()).or_default() = *n;
             }
-            let new_phrase = &untokenized.phrases.tokenize_phrase(&phrase)[0];
+            let new_phrase = &untokenized.phrases.tokenize_phrase(phrase)[0];
             tokenized.phrases.map.insert(
                 new_phrase.clone(), 
                 TextCounter {
@@ -426,21 +426,27 @@ impl SELMR {
         &self,
         text: &Text,
         n: Option<usize>,
+        literal: bool,
     ) -> Option<IndexMap<Text, usize>> {
         match text {
             Text::Word(_) => {
-                if let Some(r) = &self.phrase_roots.get(text) {
-                    match r {
-                        Text::Word(w) => {
-                            if let Some(tokens) = &w.tokens {
-                                let root = &Text::word(&tokens[0], None);
-                                let suffix = &tokens[1];
-                                self.phrases.get_filtered_multiset(root, suffix, n)
-                            } else {
-                                self.phrases.get_multiset(text, n)
-                            }
-                        },
-                        Text::Context(_) => todo!()
+                if !literal {
+                    if let Some(r) = &self.phrase_roots.get(text) {
+                        match r {
+                            Text::Word(w) => {
+                                if let Some(tokens) = &w.tokens {
+                                    let root = &Text::word(&tokens[0], None);
+                                    let suffix = &tokens[1];
+                                    self.phrases.get_filtered_multiset(root, suffix, n)
+                                } else {
+                                    self.phrases.get_multiset(text, n)
+                                }
+                            },
+                            Text::Context(_) => todo!()
+                        }
+                    } else {
+                        // tokenized word is not found
+                        self.phrases.get_multiset(text, n)
                     }
                 } else {
                     self.phrases.get_multiset(text, n)
@@ -472,10 +478,11 @@ impl SELMR {
         &self,
         texts: &Vec<Text>,
         n: Option<usize>,
+        literal: bool
     ) -> Result<HashMap<Text, usize>, String> {
         let mut result = HashMap::<Text, usize>::new();
         for text in texts {
-            if let Some(es) = self.get_multiset(text, n) {
+            if let Some(es) = self.get_multiset(text, n, literal) {
                 for (e, n) in es {
                     *result.entry(e.clone()).or_insert(0) += n;
                 }
@@ -535,14 +542,16 @@ impl SELMR {
         multiset_topn: Option<usize>,
         topn: Option<usize>,
         measure: Measure,
+        literal: bool
     ) -> Result<Vec<(Text, f32)>, String> {
-        if let Some(multiset) = self.get_multiset(&text, multiset_topn) {
+        if let Some(multiset) = self.get_multiset(&text, multiset_topn, literal) {
             self.most_similar_from_multiset(
                 &multiset,
                 constraint,
                 multiset_topn,
                 topn,
                 measure,
+                literal,
             )
         } else {
             Err(format!("Text not found: {}", text))
@@ -556,8 +565,9 @@ impl SELMR {
         multiset_topn: Option<usize>,
         topn: Option<usize>,
         measure: Measure,
+        literal: bool,
     ) -> Result<Vec<(Text, f32)>, String> {
-        match self.get_to_evaluate(multiset, constraint, multiset_topn) {
+        match self.get_to_evaluate(multiset, constraint, multiset_topn, literal) {
             Ok(to_evaluate) => {
                 self.most_similar_from_text(
                 multiset,
@@ -565,6 +575,7 @@ impl SELMR {
                 multiset_topn,
                 topn,
                 measure,
+                literal,
             )},
             Err(e) => Err(e),
         }
@@ -575,17 +586,18 @@ impl SELMR {
         multiset: &IndexMap<Text, usize>,
         constraint: Option<Text>,
         multiset_topn: Option<usize>,
+        literal: bool,
     ) -> Result<HashSet<Text>, String> {
         let mut to_evaluate: HashSet<Text> = HashSet::new();
         match constraint {
             Some(constraint) => {
-                if let Some(items) = self.get_multiset(&constraint, multiset_topn) {
+                if let Some(items) = self.get_multiset(&constraint, multiset_topn, literal) {
                     to_evaluate.extend(items.into_keys());
                 }
             }
             None => {
                 for item in multiset.keys() {
-                    if let Some(items) = self.get_multiset(item, multiset_topn) {
+                    if let Some(items) = self.get_multiset(item, multiset_topn, literal) {
                         to_evaluate.extend(items.into_keys());
                     }
                 }
@@ -601,28 +613,29 @@ impl SELMR {
         multiset_topn: Option<usize>,
         topn: Option<usize>,
         measure: Measure,
+        literal: bool,
     ) -> Result<Vec<(Text, f32)>, String> {
         let mut result = Vec::<(Text, f32)>::new();
         match measure {
-            Measure::count_index | Measure::jaccard_index => {
+            Measure::CountIndex | Measure::JaccardIndex => {
                 let set_b: HashSet<Text> = multiset.clone().into_keys().collect();
                 for text in to_evaluate {
                     let set_a = &self
-                        .get_multiset(text, multiset_topn).unwrap()
+                        .get_multiset(text, multiset_topn, literal).unwrap()
                         .into_keys()
                         .collect();
                     let value: f32 = match measure {
-                        Measure::count_index => count_index(set_a, &set_b),
-                        Measure::jaccard_index => jaccard_index(set_a, &set_b),
+                        Measure::CountIndex => count_index(set_a, &set_b),
+                        Measure::JaccardIndex => jaccard_index(set_a, &set_b),
                         _ => 0.0,
                     };
                     result.push(((*text).clone(), value));
                 }
             }
-            Measure::weighted_jaccard_index => {
+            Measure::WeightedJaccardIndex => {
                 // iterate over first n phrases that fit context c
                 for text in to_evaluate {
-                    if let Some(multiset_a) = &self.get_multiset(text, multiset_topn) {
+                    if let Some(multiset_a) = &self.get_multiset(text, multiset_topn, literal) {
                         let value: f32 = weighted_jaccard_index(multiset_a, multiset);
                         result.push(((*text).clone(), value));
                     } else {

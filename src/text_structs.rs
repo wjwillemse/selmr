@@ -354,6 +354,9 @@ impl TextMap {
                                     .or_insert(*new_n);
                             }
                         }
+                        // add also the existing multiset
+                        let phrase = Text::word(&p.value, None);
+                        new.map.insert(phrase.clone(), multiset.clone());
                     } else {
                         let phrase = Text::word(&p.value, None);
                         new.map.insert(phrase.clone(), multiset.clone());
@@ -494,20 +497,21 @@ impl TextMap {
                     ("written", "write", "verb", "irregular verb", "-ed"),
                 ]);
                 for (p, lemma, _rule, _verbose, suffix) in &simple_rules {
-                    if last_word == *p {
-                        if words.len() > 1 {
-                            let mut tokens = Vec::<String>::new();
-                            tokens.push(initial_words.to_owned()+" "+&lemma+"-");
-                            tokens.push(suffix.to_string());
-                            let res = Text::word(text, Some(tokens));
-                            results.push(res);
+                    if last_word ==*p {
+                        let res = if words.len() > 1 {
+                            let tokens = Vec::<String>::from([
+                                initial_words.to_owned()+" "+&lemma+"-",
+                                suffix.to_string(),
+                            ]);
+                            Text::word(text, Some(tokens))
                         } else {
-                            let mut tokens = Vec::<String>::new();
-                            tokens.push(lemma.to_string()+"-");
-                            tokens.push(suffix.to_string());
-                            let res = Text::word(text, Some(tokens));
-                            results.push(res);
-                        }
+                            let tokens = Vec::<String>::from([
+                                lemma.to_string()+"-",
+                                suffix.to_string(),
+                            ]);
+                            Text::word(text, Some(tokens))
+                        };
+                        results.push(res);
                     }
                 }
                 if results.is_empty() {
@@ -562,38 +566,40 @@ impl TextMap {
                                 if self.map.contains_key(&Text::word(&lemma, None)) ||
                                    self.map.contains_key(&Text::word(&lemma.to_lowercase(), None))
                                 {
-                                    if words.len() > 1 {
-                                        let mut tokens = Vec::<String>::new();
-                                        tokens.push(initial_words.to_owned()+" "+&lemma+"-");
-                                        tokens.push(suffix.to_string());
-                                        let res = Text::word(text, Some(tokens));
-                                        results.push(res);
+                                    let res = if words.len() > 1 {
+                                        let tokens = Vec::<String>::from([
+                                            initial_words.to_owned()+" "+&lemma+"-",
+                                            suffix.to_string()
+                                        ]);
+                                        Text::word(text, Some(tokens))
                                     } else {
-                                        let mut tokens = Vec::<String>::new();
-                                        tokens.push(lemma+"-");
-                                        tokens.push(suffix.to_string());
-                                        let res = Text::word(text, Some(tokens));
-                                        results.push(res);
-                                    }
+                                        let tokens = Vec::<String>::from([
+                                            lemma+"-",
+                                            suffix.to_string(),
+                                        ]);
+                                        Text::word(text, Some(tokens))
+                                    };
+                                    results.push(res);
                                 }
                             } else {
                                 let lemma = singular.to_string();
                                 if self.map.contains_key(&Text::word(&lemma, None)) ||
                                    self.map.contains_key(&Text::word(&lemma.to_lowercase(), None))
                                 {
-                                    if words.len() > 1 {
-                                        let mut tokens = Vec::<String>::new();
-                                        tokens.push(initial_words.to_owned()+" "+&lemma+"-");
-                                        tokens.push(suffix.to_string());
-                                        let res = Text::word(text, Some(tokens));
-                                        results.push(res);
+                                    let res = if words.len() > 1 {
+                                        let tokens = Vec::<String>::from([
+                                            initial_words.to_owned()+" "+&lemma+"-",
+                                            suffix.to_string(),
+                                        ]);
+                                        Text::word(text, Some(tokens))
                                     } else {
-                                        let mut tokens = Vec::<String>::new();
-                                        tokens.push(lemma+"-");
-                                        tokens.push(suffix.to_string());
-                                        let res = Text::word(text, Some(tokens));
-                                        results.push(res);
-                                    }
+                                        let tokens = Vec::<String>::from([
+                                            lemma+"-",
+                                            suffix.to_string(),
+                                        ]);
+                                        Text::word(text, Some(tokens))
+                                    };
+                                    results.push(res);
                                 }
                             }
                         }

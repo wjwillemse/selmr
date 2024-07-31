@@ -232,7 +232,7 @@ impl HAC {
 		for text in textmap.map.keys() {
 			let key = textmap.map.get_index_of(text).unwrap();
 			let texts = HashSet::from([text.clone()]);
-			let multiset_map = selmr.get_multiset(text, Some(multiset_topn)).unwrap();
+			let multiset_map = selmr.get_multiset(text, Some(multiset_topn), false).unwrap();
 			let multiset = TextCounter {
 				map: multiset_map
 					.iter()
@@ -244,7 +244,8 @@ impl HAC {
 				None, // no specific context
 				None, // all topcontexts
 				None, // all topn
-				Measure::weighted_jaccard_index
+				Measure::WeightedJaccardIndex,
+				false,
 			) {
 				Ok(r) => r.iter().map(|(p, v)|(p.clone(), OrderedFloat(*v))).collect(),
 				Err(e) => {
