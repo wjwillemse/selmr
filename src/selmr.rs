@@ -505,12 +505,13 @@ impl SELMR {
     /// ```
     /// use selmr::selmr::{SELMR, Params};
     /// use selmr::text_structs::Text;
+    /// use selmr::selmr::Measure;
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
-    /// let actual = s.most_similar(Text::word("2"), None, Some(25), Some(15), "count").unwrap();
-    /// let expect = [(Text::word("2"), 5.0), (Text::word("1"), 1.0)].iter().cloned().collect::<Vec<_>>();
+    /// let actual = s.most_similar(Text::word("2", None), None, Some(25), Some(15), Measure::CountIndex, true).unwrap();
+    /// let expect = [(Text::word("2", None), 5.0), (Text::word("1", None), 1.0)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
     ///
@@ -519,12 +520,13 @@ impl SELMR {
     /// ```
     /// use selmr::selmr::{SELMR, Params};
     /// use selmr::text_structs::Text;
+    /// use selmr::selmr::Measure;
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
-    /// let actual = s.most_similar(Text::word("2"), None, Some(25), Some(15), "jaccard").unwrap();
-    /// let expect = [(Text::word("2"), 1.0), (Text::word("1"), 0.2)].iter().cloned().collect::<Vec<_>>();
+    /// let actual = s.most_similar(Text::word("2", None), None, Some(25), Some(15), Measure::JaccardIndex, true).unwrap();
+    /// let expect = [(Text::word("2", None), 1.0), (Text::word("1", None), 0.2)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
     ///
@@ -533,12 +535,13 @@ impl SELMR {
     /// ```
     /// use selmr::selmr::{SELMR, Params};
     /// use selmr::text_structs::Text;
+    /// use selmr::selmr::Measure;
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
     /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
-    /// let actual = s.most_similar(Text::word("2"), None, Some(25), Some(15), "weighted_jaccard").unwrap();
-    /// let expect = [(Text::word("2"), 1.0), (Text::word("1"), 0.16666667)].iter().cloned().collect::<Vec<_>>();
+    /// let actual = s.most_similar(Text::word("2", None), None, Some(25), Some(15), Measure::WeightedJaccardIndex, true).unwrap();
+    /// let expect = [(Text::word("2", None), 1.0), (Text::word("1", None), 0.16666667)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
     /// ```
     pub fn most_similar(
