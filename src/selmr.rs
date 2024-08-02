@@ -72,9 +72,13 @@ impl Params {
     }
 }
 
+/// The measures that contain be used to calculate distances
 pub enum Measure {
+    /// the count index measure
     CountIndex,
+    /// the Jaccard index measure
     JaccardIndex,
+    /// the Weighted Jaccard index measure
     WeightedJaccardIndex,
 }
 
@@ -122,9 +126,11 @@ pub struct SELMR {
     /// the phrases to contexts map
     pub phrases: TextMap,
     #[serde(skip)]
+    /// the phrase roots with their phrases and tokens
     pub phrase_roots: HashMap<Text, Text>,
     /// the root phrases to contexts map
     #[serde(skip)]
+    /// the phrases and tokens with their phrase roots
     pub root_phrases: HashMap<Vec<String>, Text>,
     /// the contexts to phrases map
     #[serde(skip)]
@@ -463,7 +469,7 @@ impl SELMR {
                             [w.clone(), suffix.clone()]
                         );
                         if let Some(r) = &self.root_phrases.get(&tokens) {
-                            new_multiset.insert(r.clone().clone(), n);
+                            new_multiset.insert((*r).clone(), n);
                         }
                     }
                     Some(new_multiset)

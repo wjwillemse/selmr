@@ -41,6 +41,7 @@ impl ContextValue {
             right_value: prefix.to_owned()+" "+&self.right_value
         }
     }
+    /// remove prefix of the right side of the context
     pub fn remove_to_right(&mut self) -> String {
         let s = self.right_value.to_string();
         let l: Vec<_> = s.split(' ').collect();
@@ -54,8 +55,9 @@ impl ContextValue {
 #[derive(Hash, Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Debug)]
 #[pyclass]
 pub struct WordValue {
-    /// the string of the words in the Phrase
+    /// the string of the words
     pub value: String,
+    /// the tokens of the words
     pub tokens: Option<Vec<String>>,
 }
 
@@ -73,8 +75,6 @@ impl WordValue {
             value: self.value.to_string(),
             tokens: Some(tokens),
         }
-    }
-    pub fn add_suffix(&self) {
     }
 }
 
@@ -247,6 +247,7 @@ where
 pub struct TextMap {
     /// the map contains the actual IndexMap
     pub map: IndexMap<Text, TextCounter>,
+    /// the map with root en words have this root
     pub phrase2tokens: HashMap<Text, HashSet<Text>>,
 }
 

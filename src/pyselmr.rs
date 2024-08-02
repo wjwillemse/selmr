@@ -150,7 +150,7 @@ impl PySELMR {
         key.to_string()
     }
     /// Returns the most similar texts based on common contexts
-    #[pyo3(signature = (text, constraint=None, multiset_topn=25, topn=15, measure="count", literal=false))]
+    #[pyo3(signature = (text, constraint=None, multiset_topn=25, topn=15, measure="count", literal=true))]
     pub fn most_similar(
         &self,
         text: String,
@@ -213,7 +213,7 @@ impl PySELMR {
     //     }
     // }
     /// Get the topn associations of a text
-    #[pyo3(signature = (text="", topn=15, literal=false))]
+    #[pyo3(signature = (text="", topn=15, literal=true))]
     pub fn get_multiset(
         &self,
         text: &str,
@@ -227,7 +227,7 @@ impl PySELMR {
         }
     }
     /// Get the topn context of the phrases
-    #[pyo3(signature = (texts, topn=15, literal=false))]
+    #[pyo3(signature = (texts, topn=15, literal=true))]
     pub fn get_list_multiset(
         &self,
         texts: Vec<&str>,
