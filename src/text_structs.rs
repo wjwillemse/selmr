@@ -539,10 +539,10 @@ impl TextMap {
                         ("([a-zA-Z][a-z]*)ches", "ch", "noun", "‑ch -> add an -es", "-s"),
                         ("([a-zA-Z][a-z]*)s", "", "noun", "_ -> add an -s", "-s"),
                         // regular verb rules
-                        ("([a-zA-Z][a-z]*[aeuoi])d", "", "verb", "-vowel -> add an -d", "-ed"),
-                        ("([a-zA-Z][a-z]*[b-df-hj-np-tv-z])ed", "", "verb", "-consonant -> add an -ed", "-ed"),
                         ("([a-zA-Z][a-z]*[b-df-hj-np-tv-z])ied", "y", "verb", "-consonent and -y -> add an -ied", "-ed"),
+                        ("([a-zA-Z][a-z]*[b-df-hj-np-tv-z])ed", "", "verb", "-consonant -> add an -ed", "-ed"),
                         ("([a-zA-Z][a-z]*[b-df-hj-np-tv-z])[b-df-hj-np-tv-z]ed", "", "verb", "-consonant -> add an -ed", "-ed"),
+                        ("([a-zA-Z][a-z]*[aeuoi])d", "", "verb", "-vowel -> add an -d", "-ed"),
                         ("([a-zA-Z][a-z]*)s", "", "verb", "_ -> add an -s", "-s"),
                         ("([a-zA-Z][a-z]*)ches", "ch", "verb", "ch -> add an -es", "-s"),
                         ("([a-zA-Z][a-z]*)shes", "sh", "verb", "sh -> add an -es", "-s"),

@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 #[pymodule]
-fn selmr(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn selmr(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySELMR>()?;
     m.add_class::<PyHAC>()?;
     Ok(())
@@ -150,7 +150,7 @@ impl PySELMR {
         key.to_string()
     }
     /// Returns the most similar texts based on common contexts
-    #[pyo3(signature = (text, constraint=None, multiset_topn=25, topn=15, measure="count", literal=true))]
+    #[pyo3(signature = (text, constraint=None, multiset_topn=25, topn=15, measure="count", exact=true))]
     pub fn most_similar(
         &self,
         text: String,
@@ -158,7 +158,7 @@ impl PySELMR {
         multiset_topn: usize,
         topn: usize,
         measure: &str,
-        literal: bool,
+        exact: bool,
     ) -> Result<Vec<(String, f32)>, PyErr> {
         let text = Text::extract(text.as_str());
         let constraint = constraint.map(|c|Text::extract(c.as_str()));
@@ -175,7 +175,7 @@ impl PySELMR {
             Some(multiset_topn), 
             Some(topn), 
             measure,
-            literal)
+            exact)
         {
             Ok(r) => Ok(r.iter().map(|(p, n)|(p.to_string(), *n)).collect()),
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
@@ -213,29 +213,29 @@ impl PySELMR {
     //     }
     // }
     /// Get the topn associations of a text
-    #[pyo3(signature = (text="", topn=15, literal=true))]
+    #[pyo3(signature = (text="", topn=15, exact=true))]
     pub fn get_multiset(
         &self,
         text: &str,
         topn: usize,
-        literal: bool,
+        exact: bool,
     ) -> Result<HashMap<String, usize>, PyErr> {
         let item = Text::extract(text);
-        match self.selmr.get_multiset(&item, Some(topn), literal) {
+        match self.selmr.get_multiset(&item, Some(topn), exact) {
             Some(r) => Ok(r.iter().map(|(c, v)| (c.to_string(), *v)).collect()),
             None => Err(PyErr::new::<PyTypeError, _>("Text not found")),
         }
     }
     /// Get the topn context of the phrases
-    #[pyo3(signature = (texts, topn=15, literal=true))]
+    #[pyo3(signature = (texts, topn=15, exact=true))]
     pub fn get_list_multiset(
         &self,
         texts: Vec<&str>,
         topn: usize,
-        literal: bool,
+        exact: bool,
     ) -> Result<HashMap<String, usize>, PyErr> {
         let texts = texts.iter().map(|e| Text::extract(e)).collect();
-        match self.selmr.get_list_multiset(&texts, Some(topn), literal) {
+        match self.selmr.get_list_multiset(&texts, Some(topn), exact) {
             Ok(r) => Ok(r.iter().map(|(m, n)| (m.to_string(), *n)).collect()),
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }

@@ -9,7 +9,7 @@ use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::io::prelude::*;
 use std::{fs, io::Write, path};
-use zip::{write::FileOptions, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 use crate::hac::HAC;
 
 /// Struct containing all parameters of a SELMR data structure
@@ -191,7 +191,7 @@ impl SELMR {
         } else if format == "zip" {
             let mut zip = ZipWriter::new(f);
             let s = serde_json::to_string_pretty(&self).unwrap();
-            match zip.start_file("data.json", FileOptions::default()) {
+            match zip.start_file("data.json", SimpleFileOptions::default()) {
                 Ok(()) => match zip.write_all(s.as_bytes()) {
                     Ok(()) => match zip.finish() {
                         Ok(_) => {
@@ -432,11 +432,11 @@ impl SELMR {
         &self,
         text: &Text,
         n: Option<usize>,
-        literal: bool,
+        exact: bool,
     ) -> Option<IndexMap<Text, usize>> {
         match text {
             Text::Word(_) => {
-                if !literal {
+                if !exact {
                     if let Some(r) = &self.phrase_roots.get(text) {
                         match r {
                             Text::Word(w) => {
@@ -459,20 +459,24 @@ impl SELMR {
                 }
             },
             Text::Context(_) => {
-                if text.to_string().contains('-') {
-                    let suffix = text.clone().remove_to_right();
-                    let multiset = self.contexts.get_multiset(text, n);
-                    let mut new_multiset = IndexMap::<Text, usize>::new();
-                    for (root, n) in multiset.clone().unwrap() {
-                        let w = root.to_string();
-                        let tokens = Vec::from(
-                            [w.clone(), suffix.clone()]
-                        );
-                        if let Some(r) = &self.root_phrases.get(&tokens) {
-                            new_multiset.insert((*r).clone(), n);
+                if !exact {
+                    if text.to_string().contains('-') {
+                        let suffix = text.clone().remove_to_right();
+                        let multiset = self.contexts.get_multiset(text, n);
+                        let mut new_multiset = IndexMap::<Text, usize>::new();
+                        for (root, n) in multiset.clone().unwrap() {
+                            let w = root.to_string();
+                            let tokens = Vec::from(
+                                [w.clone(), suffix.clone()]
+                            );
+                            if let Some(r) = &self.root_phrases.get(&tokens) {
+                                new_multiset.insert((*r).clone(), n);
+                            }
                         }
+                        Some(new_multiset)
+                    } else {
+                        self.contexts.get_multiset(text, n)
                     }
-                    Some(new_multiset)
                 } else {
                     self.contexts.get_multiset(text, n)
                 }
@@ -484,11 +488,11 @@ impl SELMR {
         &self,
         texts: &Vec<Text>,
         n: Option<usize>,
-        literal: bool
+        exact: bool
     ) -> Result<HashMap<Text, usize>, String> {
         let mut result = HashMap::<Text, usize>::new();
         for text in texts {
-            if let Some(es) = self.get_multiset(text, n, literal) {
+            if let Some(es) = self.get_multiset(text, n, exact) {
                 for (e, n) in es {
                     *result.entry(e.clone()).or_insert(0) += n;
                 }
@@ -551,16 +555,16 @@ impl SELMR {
         multiset_topn: Option<usize>,
         topn: Option<usize>,
         measure: Measure,
-        literal: bool
+        exact: bool
     ) -> Result<Vec<(Text, f32)>, String> {
-        if let Some(multiset) = self.get_multiset(&text, multiset_topn, literal) {
+        if let Some(multiset) = self.get_multiset(&text, multiset_topn, exact) {
             self.most_similar_from_multiset(
                 &multiset,
                 constraint,
                 multiset_topn,
                 topn,
                 measure,
-                literal,
+                exact,
             )
         } else {
             Err(format!("Text not found: {}", text))
@@ -574,9 +578,9 @@ impl SELMR {
         multiset_topn: Option<usize>,
         topn: Option<usize>,
         measure: Measure,
-        literal: bool,
+        exact: bool,
     ) -> Result<Vec<(Text, f32)>, String> {
-        match self.get_to_evaluate(multiset, constraint, multiset_topn, literal) {
+        match self.get_to_evaluate(multiset, constraint, multiset_topn, exact) {
             Ok(to_evaluate) => {
                 self.most_similar_from_text(
                 multiset,
@@ -584,7 +588,7 @@ impl SELMR {
                 multiset_topn,
                 topn,
                 measure,
-                literal,
+                exact,
             )},
             Err(e) => Err(e),
         }
@@ -595,18 +599,18 @@ impl SELMR {
         multiset: &IndexMap<Text, usize>,
         constraint: Option<Text>,
         multiset_topn: Option<usize>,
-        literal: bool,
+        exact: bool,
     ) -> Result<HashSet<Text>, String> {
         let mut to_evaluate: HashSet<Text> = HashSet::new();
         match constraint {
             Some(constraint) => {
-                if let Some(items) = self.get_multiset(&constraint, multiset_topn, literal) {
+                if let Some(items) = self.get_multiset(&constraint, multiset_topn, exact) {
                     to_evaluate.extend(items.into_keys());
                 }
             }
             None => {
                 for item in multiset.keys() {
-                    if let Some(items) = self.get_multiset(item, multiset_topn, literal) {
+                    if let Some(items) = self.get_multiset(item, multiset_topn, exact) {
                         to_evaluate.extend(items.into_keys());
                     }
                 }
@@ -622,7 +626,7 @@ impl SELMR {
         multiset_topn: Option<usize>,
         topn: Option<usize>,
         measure: Measure,
-        literal: bool,
+        exact: bool,
     ) -> Result<Vec<(Text, f32)>, String> {
         let mut result = Vec::<(Text, f32)>::new();
         match measure {
@@ -630,7 +634,7 @@ impl SELMR {
                 let set_b: HashSet<Text> = multiset.clone().into_keys().collect();
                 for text in to_evaluate {
                     let set_a = &self
-                        .get_multiset(text, multiset_topn, literal).unwrap()
+                        .get_multiset(text, multiset_topn, exact).unwrap()
                         .into_keys()
                         .collect();
                     let value: f32 = match measure {
@@ -644,7 +648,7 @@ impl SELMR {
             Measure::WeightedJaccardIndex => {
                 // iterate over first n phrases that fit context c
                 for text in to_evaluate {
-                    if let Some(multiset_a) = &self.get_multiset(text, multiset_topn, literal) {
+                    if let Some(multiset_a) = &self.get_multiset(text, multiset_topn, exact) {
                         let value: f32 = weighted_jaccard_index(multiset_a, multiset);
                         result.push(((*text).clone(), value));
                     } else {
