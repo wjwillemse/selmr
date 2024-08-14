@@ -501,7 +501,7 @@ impl TextMap {
                     if last_word ==*p {
                         let res = if words.len() > 1 {
                             let tokens = Vec::<String>::from([
-                                initial_words.to_owned()+" "+&lemma+"-",
+                                initial_words.to_owned()+" "+lemma+"-",
                                 suffix.to_string(),
                             ]);
                             Text::word(text, Some(tokens))
@@ -625,7 +625,9 @@ impl TextMap {
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let mut text = Vec::<String>::new();
+    /// text.push("a 1 b c. a 2 b c. a 2 b d.".to_string());
+    /// s.add(text, Some(&params));
     /// let actual = s.get_multiset(&Text::word("1", None), Some(15), true).unwrap();
     /// let context = Text::context("a", "b");
     /// let expect = [(context, &1)].iter().cloned().map(|(p, n)|(p, *n)).collect::<IndexMap<_, _>>();

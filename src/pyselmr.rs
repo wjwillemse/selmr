@@ -1,7 +1,7 @@
 use crate::selmr::{Params, SELMR};
 use crate::hac::PyHAC;
 use crate::text_structs::{Text, TextMap};
-use crate::tokenizer::tokenize;
+// use crate::tokenizer;
 use crate::selmr::Measure;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -93,7 +93,7 @@ impl PySELMR {
     /// add text data to SELMR data structure
     pub fn add<'a>(
         &mut self,
-        text: &str,
+        text: Vec<String>,
         min_phrase_len: usize,
         max_phrase_len: usize,
         min_left_context_len: usize,
@@ -226,20 +226,20 @@ impl PySELMR {
             None => Err(PyErr::new::<PyTypeError, _>("Text not found")),
         }
     }
-    /// Get the topn context of the phrases
-    #[pyo3(signature = (texts, topn=15, exact=true))]
-    pub fn get_list_multiset(
-        &self,
-        texts: Vec<&str>,
-        topn: usize,
-        exact: bool,
-    ) -> Result<HashMap<String, usize>, PyErr> {
-        let texts = texts.iter().map(|e| Text::extract(e)).collect();
-        match self.selmr.get_list_multiset(&texts, Some(topn), exact) {
-            Ok(r) => Ok(r.iter().map(|(m, n)| (m.to_string(), *n)).collect()),
-            Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
-        }
-    }
+    // /// Get the topn context of the phrases
+    // #[pyo3(signature = (texts, topn=15, exact=true))]
+    // pub fn get_list_multiset(
+    //     &self,
+    //     texts: Vec<str>,
+    //     topn: usize,
+    //     exact: bool,
+    // ) -> Result<HashMap<String, usize>, PyErr> {
+    //     let texts = texts.iter().map(|e| Text::extract(e)).collect();
+    //     match self.selmr.get_list_multiset(&texts, Some(topn), exact) {
+    //         Ok(r) => Ok(r.iter().map(|(m, n)| (m.to_string(), *n)).collect()),
+    //         Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
+    //     }
+    // }
     /// Prunes a SELMR data structure
     #[pyo3(signature = (topn_phrases=50, topn_contexts=50))]
     pub fn prune(&mut self, topn_phrases: usize, topn_contexts: usize
@@ -307,10 +307,11 @@ impl PySELMR {
             Err(e) => Err(PyErr::new::<PyTypeError, _>(e)),
         }
     }
-    /// Tokenizer
-    pub fn tokenize<'a>(
-        &'a self,
-        contents: &'a str) -> Result<Vec<Vec<&str>>, PyErr> {
-        Ok(tokenize(contents))
-    }
+    // /// Tokenizer
+    // pub fn tokenize<'a>(
+    //     &'a self,
+    //     text: Vec<String>) -> Result<Vec<Vec<&str>>, PyErr> {
+    //     let sentences = tokenizer::tokenize(&text);
+    //     Ok(sentences)
+    // }
 }

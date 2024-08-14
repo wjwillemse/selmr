@@ -3,7 +3,7 @@ use crate::tokenizer;
 use core::cmp::{max, min};
 use counter::Counter;
 use indexmap::IndexMap;
-use log::info;
+// use log::info;
 use regex::Regex;
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
@@ -309,15 +309,14 @@ impl SELMR {
     /// ```
     pub fn add<'a>(
         &mut self,
-        text: &str,
+        text: Vec<String>,
         params: Option<&Params>,
     ) {
         if params.is_some() {
             self.params = params.unwrap().clone();
         }
-        let binding = text.to_string();
-        let sentences = self.text_tokens(&binding);
-        info!(target: "selmr", "adding {} tokens", text.len());
+        let sentences = tokenizer::tokenize(&text);
+        // info!(target: "selmr", "adding {} tokens", text.len());
         let mut phrases = HashMap::<&'a [&'a str], Counter<(&'a [&'a str], &'a [&'a str])>>::new();
         for l_len in self.params.min_left_context_len..self.params.max_left_context_len + 1 {
             for r_len in self.params.min_right_context_len..self.params.max_right_context_len + 1 {
@@ -513,7 +512,9 @@ impl SELMR {
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let mut text = Vec::<String>::new();
+    /// text.push("a 1 b c. a 2 b c. a 2 b d.".to_string());
+    /// s.add(text, Some(&params));
     /// let actual = s.most_similar(Text::word("2", None), None, Some(25), Some(15), Measure::CountIndex, true).unwrap();
     /// let expect = [(Text::word("2", None), 5.0), (Text::word("1", None), 1.0)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
@@ -528,7 +529,9 @@ impl SELMR {
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let mut text = Vec::<String>::new();
+    /// text.push("a 1 b c. a 2 b c. a 2 b d.".to_string());
+    /// s.add(text, Some(&params));
     /// let actual = s.most_similar(Text::word("2", None), None, Some(25), Some(15), Measure::JaccardIndex, true).unwrap();
     /// let expect = [(Text::word("2", None), 1.0), (Text::word("1", None), 0.2)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
@@ -543,7 +546,9 @@ impl SELMR {
     ///
     /// let params = Params::test();
     /// let mut s = SELMR::new();
-    /// s.add("a 1 b c. a 2 b c. a 2 b d.", Some(&params));
+    /// let mut text = Vec::<String>::new();
+    /// text.push("a 1 b c. a 2 b c. a 2 b d.".to_string());
+    /// s.add(text, Some(&params));
     /// let actual = s.most_similar(Text::word("2", None), None, Some(25), Some(15), Measure::WeightedJaccardIndex, true).unwrap();
     /// let expect = [(Text::word("2", None), 1.0), (Text::word("1", None), 0.16666667)].iter().cloned().collect::<Vec<_>>();
     /// assert_eq!(actual, expect);
@@ -768,13 +773,6 @@ impl SELMR {
             }
         }
         Some(results)
-    }
-    /// tokenize text
-    pub fn text_tokens<'a>(
-        &'a self,
-        text: &'a str) -> Vec<Vec<&str>>{
-        let sentences = tokenizer::tokenize(text);
-        sentences
     }
     /// Perform clustering of the phrases to create tree
     pub fn generate_trees(
