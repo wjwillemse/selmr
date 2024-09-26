@@ -202,6 +202,13 @@ impl SELMR {
                                         if let Some(tokens) = &w.tokens {
                                             self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
                                             self.root_phrases.insert(tokens.clone(), Text::word(&w.value, None));
+                                            // let root_tokens = Vec::<String>::from([
+                                            //     tokens[0].clone(),
+                                            //     "-".to_string(),
+                                            // ]);
+                                            // let root = Text::word(&tokens[0].clone(), Some(root_tokens.clone()));
+                                            // self.phrase_roots.insert(Text::word(&tokens[0].clone(), None), root);
+                                            // self.root_phrases.insert(root_tokens.clone(), Text::word(&tokens[0].clone(), None));
                                         }
                                     },
                                     Text::Context(_) => todo!()
@@ -289,6 +296,13 @@ impl SELMR {
                     if let Some(tokens) = &w.tokens {
                         self.phrase_roots.insert(Text::word(&w.value, None), phrase.clone());
                         self.root_phrases.insert(tokens.clone(), Text::word(&w.value, None));
+                        // let root_tokens = Vec::<String>::from([
+                        //     tokens[0].clone(),
+                        //     "-".to_string(),
+                        // ]);
+                        // let root = Text::word(&tokens[0].clone(), Some(root_tokens.clone()));
+                        // self.phrase_roots.insert(Text::word(&tokens[0].clone(), None), root);
+                        // self.root_phrases.insert(root_tokens.clone(), Text::word(&tokens[0].clone(), None));
                     }
                 },
                 Text::Context(_) => todo!()

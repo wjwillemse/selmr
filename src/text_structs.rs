@@ -320,7 +320,8 @@ impl TextMap {
                         // if the tokenized word is not yet added, add it once with contents of word
                         // so: if 'discover-' is not yet added, initialize with multiset of 'discover'
                         if !new.map.contains_key(&phrase_base) {
-                            if let Some(multiset) = self.get_multiset(&phrase_base, None) {
+                            let phrase_root = Text::word(&tokens[0][0..tokens[0].len()-1], None);
+                            if let Some(multiset) = self.get_multiset(&phrase_root, None) {
                                 let new_multiset = TextCounter {
                                     map: multiset
                                         .iter()

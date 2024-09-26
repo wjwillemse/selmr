@@ -5,15 +5,15 @@ readme = "README.md"
 homepage = "https://github.com/wjwillemse/selmr"
 repository = "https://github.com/wjwillemse/selmr"
 license = "MIT"
-version = "0.4.0"
+version = "0.4.2"
 edition = "2021"
 
 [lib]
 name = "selmr"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.22.2", features = ["extension-module"] }
+pyo3 = { version = "0.22.2", features = ["abi3-py38",  "extension-module", "multiple-pymethods"] }
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.122"
 counter = "0.6.0"

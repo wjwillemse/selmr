@@ -21,7 +21,7 @@ pub fn most_similar_test() {
         Ok(actual) => {
             assert_eq!(
                 actual,
-                [(Text::word("bump", None), 3.0), (Text::word("bump bump", None), 2.0)]
+                [(Text::word("bump", None), 3.0), (Text::word("bump-", None), 3.0), (Text::word("bump bump", None), 2.0)]
             );
         }
         Err(_) => todo!(),
