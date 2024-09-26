@@ -13,4 +13,4 @@ SELMRs produce explainable results without any randomness and enable explicit li
 with lexical, linguistical and terminological annotations. No model is trained and no
 dimensionality reduction is applied.
 
-For information on how to use this package, please look [here](https://www.mangosaurus.nl/posts/introduction-to-selmr/).
+For information on how to use this package, please look [here](https://www.mangosaurus.nl/introduction-to-selmr.html).
